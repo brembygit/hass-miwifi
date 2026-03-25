@@ -286,6 +286,7 @@ class Model(str, Enum):
     # RD Series
     
     RD03 = "rd03"  # Xiaomi Router AX3000T  ​              | 2023.08.31
+    RD03v2 = "rd03v2"  # Xiaomi Router AX3000T (V2) ​      | 2025.04.08
     RD05 = "rd05"  # Xiaomi Mi Router 4A  ​                | 2024.09.05
     RD04 = "rd04"  # Xiaomi Mi Router AX1500              | 2023.12.08
     RD04v2 = "rd04v2"  # Xiaomi Router AX1500  ​           | 2024.11.08
