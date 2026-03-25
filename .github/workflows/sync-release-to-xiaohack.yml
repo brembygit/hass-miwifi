@@ -1,0 +1,64 @@
+name: Sync release to XiaoHack web
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  sync-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Send published release to XiaoHack
+        env:
+          WEBHOOK_URL: ${{ secrets.XIAOHACK_RELEASE_WEBHOOK_URL }}
+          WEBHOOK_TOKEN: ${{ secrets.XIAOHACK_RELEASE_WEBHOOK_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          TAG_NAME: ${{ github.event.release.tag_name }}
+          RELEASE_NAME: ${{ github.event.release.name }}
+          RELEASE_BODY: ${{ github.event.release.body }}
+          RELEASE_URL: ${{ github.event.release.html_url }}
+          PUBLISHED_AT: ${{ github.event.release.published_at }}
+          PRERELEASE: ${{ github.event.release.prerelease }}
+          DRAFT: ${{ github.event.release.draft }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+          import urllib.request
+
+          payload = {
+              "repository": os.environ["REPOSITORY"],
+              "tag_name": os.environ["TAG_NAME"],
+              "name": os.environ.get("RELEASE_NAME", ""),
+              "body_en": os.environ.get("RELEASE_BODY", ""),
+              "html_url": os.environ["RELEASE_URL"],
+              "published_at": os.environ["PUBLISHED_AT"],
+              "prerelease": os.environ["PRERELEASE"].lower() == "true",
+              "draft": os.environ["DRAFT"].lower() == "true",
+          }
+
+          data = json.dumps(payload).encode("utf-8")
+
+          req = urllib.request.Request(
+              os.environ["WEBHOOK_URL"],
+              data=data,
+              headers={
+                  "Content-Type": "application/json",
+                  "X-Webhook-Token": os.environ["WEBHOOK_TOKEN"],
+              },
+              method="POST",
+          )
+
+          try:
+              with urllib.request.urlopen(req, timeout=60) as resp:
+                  body = resp.read().decode("utf-8", errors="replace")
+                  print(f"HTTP {resp.status}")
+                  print(body)
+                  if resp.status >= 400:
+                      sys.exit(1)
+          except Exception as e:
+              print(f"Webhook call failed: {e}")
+              sys.exit(1)
+          PY
