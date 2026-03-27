@@ -154,4 +154,4 @@ Basado en el trabajo original de [@dmamontov](https://github.com/dmamontov/hass-
 
 ---
 
-¿Tienes dudas o sugerencias? Únete al canal de [Telegram de Xiaohack](https://t.me/Xiaohack).
+¿Tienes dudas o sugerencias? Únete al canal de [Telegram de Xiaohack](https://t.me/XiaohackRouters).
