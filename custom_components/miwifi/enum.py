@@ -77,7 +77,7 @@ class Connection(IntEnum):
     WIFI_5_0 = 2, "5G"
     GUEST = 3, "Guest"
     WIFI_5_0_GAME = 6, "5G Game"
-
+    WIFI_IOT = 7, "IoT"
 
 class IfName(str, Enum):
     """IfName enum"""

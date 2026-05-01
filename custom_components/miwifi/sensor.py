@@ -45,6 +45,8 @@ from .const import (
     ATTR_SENSOR_DEVICES_5_0_GAME,
     ATTR_SENSOR_DEVICES_5_0_GAME_NAME,
     ATTR_SENSOR_DEVICES_5_0_NAME,
+    ATTR_SENSOR_DEVICES_IOT,
+    ATTR_SENSOR_DEVICES_IOT_NAME,
     ATTR_SENSOR_DEVICES_GUEST,
     ATTR_SENSOR_DEVICES_GUEST_NAME,
     ATTR_SENSOR_DEVICES_LAN,
@@ -236,6 +238,14 @@ MIWIFI_SENSORS: tuple[SensorEntityDescription, ...] = (
     SensorEntityDescription(
         key=ATTR_SENSOR_DEVICES_5_0_GAME,
         name=ATTR_SENSOR_DEVICES_5_0_GAME_NAME,
+        icon="mdi:counter",
+        native_unit_of_measurement=PCS,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_registry_enabled_default=True,
+    ),
+        SensorEntityDescription(
+        key=ATTR_SENSOR_DEVICES_IOT,
+        name=ATTR_SENSOR_DEVICES_IOT_NAME,
         icon="mdi:counter",
         native_unit_of_measurement=PCS,
         state_class=SensorStateClass.MEASUREMENT,

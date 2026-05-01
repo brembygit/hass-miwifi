@@ -52,6 +52,7 @@ from .const import (
     ATTR_SENSOR_DEVICES_2_4,
     ATTR_SENSOR_DEVICES_5_0,
     ATTR_SENSOR_DEVICES_5_0_GAME,
+    ATTR_SENSOR_DEVICES_IOT,
     ATTR_SENSOR_DEVICES_GUEST,
     ATTR_SENSOR_DEVICES_LAN,
     ATTR_SENSOR_MEMORY_TOTAL,
@@ -143,6 +144,7 @@ NEW_STATUS_MAP: Final = {
     "2g": ATTR_SENSOR_DEVICES_2_4,
     "5g": ATTR_SENSOR_DEVICES_5_0,
     "game": ATTR_SENSOR_DEVICES_5_0_GAME,
+    "iot": ATTR_SENSOR_DEVICES_IOT,
 }
 
 REPEATER_SKIP_ATTRS: Final = (
@@ -312,7 +314,11 @@ class LuciUpdater(DataUpdateCoordinator):
 
             for method in PREPARE_METHODS:
                 if not self._is_only_login or method == "init":
-                    
+                    # Routers with dedicated IoT WiFi (e.g. RC01 / RC06):
+                    # count clients from device_list + parent, not from new_status.
+                    if self.is_force_load and self._has_dedicated_iot_wifi() and method == "new_status":
+                        continue
+
                     if method in ("devices", "device_list") and "new_status" in self.data and self.is_force_load:
                         continue
                     await self._async_prepare(method, self.data)
@@ -368,8 +374,9 @@ class LuciUpdater(DataUpdateCoordinator):
         if not self._is_only_login:
             self._clean_devices()
 
-        if "new_status" not in self.data:
-            await self._async_prepare_new_status(self.data)
+        if not (self.is_force_load and self._has_dedicated_iot_wifi()):
+            if "new_status" not in self.data:
+                await self._async_prepare_new_status(self.data)
             
         await self._async_prepare_topo()
 
@@ -427,6 +434,69 @@ class LuciUpdater(DataUpdateCoordinator):
         """
 
         return self.data.get(ATTR_SWITCH_WIFI_5_0_GAME, None) is not None
+
+    def _has_dedicated_iot_wifi(self) -> bool:
+        """Return True for firmwares with dedicated IoT WiFi."""
+        features = self.data.get("features", {})
+        wifi_features = features.get("wifi", {}) if isinstance(features, dict) else {}
+
+        if isinstance(wifi_features, dict) and str(wifi_features.get("iot_dev", "0")) == "1":
+            return True
+
+        model_enum = self.data.get(ATTR_MODEL)
+        model_str = str(self.data.get(ATTR_DEVICE_MODEL) or "").strip().lower()
+
+        return (
+            model_enum in (Model.RC01, Model.RC06)
+            or "rc01" in model_str
+            or "rc06" in model_str
+            or "be10000" in model_str
+            or "be7000" in model_str
+        )
+
+    def _resolve_connection(self, device: dict) -> Connection | None:
+        """Resolve connection type safely.
+
+        Generic routers:
+        - keep current behavior
+        - wifiIndex=3 may still map to 5G Game
+
+        Routers with dedicated IoT WiFi:
+        - type 5 => 5G Game
+        - type 6 => IoT dedicated WiFi
+        """
+        raw_type = device.get("type")
+
+        try:
+            raw_type_int = int(raw_type) if raw_type not in ("", None) else None
+        except Exception:
+            raw_type_int = None
+
+        if self._has_dedicated_iot_wifi():
+            if raw_type_int == 5:
+                return Connection.WIFI_5_0_GAME
+            if raw_type_int == 6:
+                return Connection.WIFI_IOT
+
+            with contextlib.suppress(ValueError, TypeError):
+                return Connection(raw_type_int) if raw_type_int is not None else None
+
+            return None
+
+        if self.is_force_load and "wifiIndex" in device:
+            try:
+                wifi_index = int(device["wifiIndex"])
+                if wifi_index == 3:
+                    return Connection.WIFI_5_0_GAME
+                with contextlib.suppress(ValueError, TypeError):
+                    return Connection(wifi_index)
+            except Exception:
+                pass
+
+        with contextlib.suppress(ValueError, TypeError):
+            return Connection(raw_type_int) if raw_type_int is not None else None
+
+        return None
 
     @property
     def supports_update(self) -> bool:
@@ -545,6 +615,9 @@ class LuciUpdater(DataUpdateCoordinator):
             return
 
         response: dict = await self.luci.init_info()
+
+        if "features" in response and isinstance(response["features"], dict):
+            data["features"] = response["features"]
 
         if "model" in response:
             data[ATTR_DEVICE_MODEL] = response["model"]
@@ -1409,6 +1482,13 @@ class LuciUpdater(DataUpdateCoordinator):
             if not isinstance(device, dict):
                 continue
 
+            # Skip mesh/AP nodes from client counters and trackers
+            try:
+                if int(device.get("isap", 0) or 0) > 0:
+                    continue
+            except Exception:
+                pass
+
             # Use only ACTIVE IP entry (avoid stale/offline snapshots causing flapping)
             ip_list = device.get("ip") if isinstance(device.get("ip"), list) else []
             active_ip = next(
@@ -1424,7 +1504,7 @@ class LuciUpdater(DataUpdateCoordinator):
 
             # Keep only the active IP entry
             device["ip"] = [active_ip]
-            
+
             # ✅ WAN access (devicelist reports authority.wan: 0=blocked, 1=allowed)
             # Keep tracker attribute consistent across refreshes/screens.
             try:
@@ -1479,6 +1559,9 @@ class LuciUpdater(DataUpdateCoordinator):
             if not isinstance(updater, LuciUpdater):
                 continue
 
+            # ✅ Reset counters ONCE per parent refresh before recounting
+            updater.reset_counter(is_force=True)
+
             leaf_entry_id = getattr(updater, "_entry_id", None) or self._entry_id
 
             for device in devices:
@@ -1489,8 +1572,11 @@ class LuciUpdater(DataUpdateCoordinator):
                 device.setdefault(ATTR_TRACKER_ENTRY_ID, leaf_entry_id)
                 device.setdefault(ATTR_TRACKER_UPDATER_ENTRY_ID, leaf_entry_id)
 
-                await updater.add_device(device, action=DeviceAction.ADD)
-
+                await updater.add_device(
+                    device,
+                    is_from_parent=True,
+                    action=DeviceAction.ADD,
+                )
 
     async def _async_prepare_device_restore(self, data: dict) -> None:
         """Restore devices
@@ -1639,22 +1725,40 @@ class LuciUpdater(DataUpdateCoordinator):
         elif action == DeviceAction.MOVE:
             await self.hass.async_add_executor_job(_LOGGER.debug, "Move device: %s", device[ATTR_TRACKER_MAC])
 
-        if device[ATTR_TRACKER_MAC] in self._moved_devices or (
-            self.is_repeater and self.is_force_load
-        ):
+        if device[ATTR_TRACKER_MAC] in self._moved_devices:
             return
 
+        # Keep legacy behavior for older routers.
+        # Only allow leaf counters to be updated from parent in routers with dedicated IoT WiFi.
+        if self.is_repeater and self.is_force_load:
+            if not (is_from_parent and self._has_dedicated_iot_wifi()):
+                return
+
         if "new_status" not in self.data:
-            # Defensive defaults to avoid KeyError on cold start / edge-cases
             self.data.setdefault(ATTR_SENSOR_DEVICES, 0)
             self.data.setdefault(ATTR_SENSOR_DEVICES_LAN, 0)
             self.data.setdefault(ATTR_SENSOR_DEVICES_GUEST, 0)
             self.data.setdefault(ATTR_SENSOR_DEVICES_2_4, 0)
             self.data.setdefault(ATTR_SENSOR_DEVICES_5_0, 0)
             self.data.setdefault(ATTR_SENSOR_DEVICES_5_0_GAME, 0)
+            self.data.setdefault(ATTR_SENSOR_DEVICES_IOT, 0)
 
             self.data[ATTR_SENSOR_DEVICES] += 1
+
             connection = _device.get(ATTR_TRACKER_CONNECTION)
+
+            # ✅ Defensive fallback only for routers with dedicated IoT WiFi
+            if connection is None and self._has_dedicated_iot_wifi():
+                try:
+                    raw_type = int(device.get("type")) if device.get("type") not in ("", None) else None
+                except Exception:
+                    raw_type = None
+
+                if raw_type == 5:
+                    connection = Connection.WIFI_5_0_GAME
+                elif raw_type == 6:
+                    connection = Connection.WIFI_IOT
+
             code: str = (connection or Connection.LAN).name.replace("WIFI_", "")
             code = f"{ATTR_SENSOR_DEVICES}_{code}".lower()
             self.data.setdefault(code, 0)
@@ -1674,13 +1778,7 @@ class LuciUpdater(DataUpdateCoordinator):
 
         ip_attr: dict | None = device["ip"][0] if "ip" in device and device["ip"] else None
 
-        if self.is_force_load and "wifiIndex" in device:
-            device["type"] = 6 if device["wifiIndex"] == 3 else device["wifiIndex"]
-
-        connection: Connection | None = None
-
-        with contextlib.suppress(ValueError):
-            connection = Connection(int(device["type"])) if "type" in device else None
+        connection: Connection | None = self._resolve_connection(device)
 
         existing = self.devices.get(device[ATTR_TRACKER_MAC], {})
         total_usage = device.get(
@@ -1788,7 +1886,6 @@ class LuciUpdater(DataUpdateCoordinator):
             ATTR_TRACKER_INTERNET_BLOCKED: bool(internet_blocked),
             ATTR_TRACKER_TOTAL_USAGE: total_usage,
         }
-
 
 
     def _mass_update_device(self, device: dict, integrations: dict) -> bool:
@@ -1931,6 +2028,7 @@ class LuciUpdater(DataUpdateCoordinator):
             ATTR_SENSOR_DEVICES_2_4,
             ATTR_SENSOR_DEVICES_5_0,
             ATTR_SENSOR_DEVICES_5_0_GAME,
+            ATTR_SENSOR_DEVICES_IOT,
         ]:
             if attr in self.data and is_remove:
                 del self.data[attr]
