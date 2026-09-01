@@ -131,6 +131,7 @@ class LuciClient:
 
         self.diagnostics: dict[str, Any] = {}
         self._api_paths = API_PATHS.copy()
+        self._mode_fallback_logged: bool = False
         
     async def _request_with_retry(self, method: str, url: str, **kwargs) -> Response:
         """Execute GET/POST on self._client.
@@ -446,8 +447,19 @@ class LuciClient:
         """
         try:
             return await self.get(self._api_paths["mode"])
-        except:
-            _LOGGER.info("Primary endpoint failed load qnetwork/get_netmode")
+        # LuciError derives from BaseException, so it needs naming explicitly;
+        # a bare except would also swallow CancelledError.
+        except (Exception, LuciError):
+            # Routers without xqnetwork/mode fall back on every poll cycle, so
+            # this is only worth reporting the first time it happens.
+            if not self._mode_fallback_logged:
+                self._mode_fallback_logged = True
+                _LOGGER.debug(
+                    "Primary endpoint %s failed, falling back to %s",
+                    self._api_paths["mode"],
+                    self._api_paths["netmode"],
+                )
+
             try:
                 response = await self.netmode()
                 # Convert netmode field to mode field for compatibility
