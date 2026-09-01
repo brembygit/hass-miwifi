@@ -125,7 +125,6 @@ async def test_calc_passwd(hass: HomeAssistant) -> None:
             SERVICE_CALC_PASSWD,
             target={CONF_DEVICE_ID: [device.id]},
             blocking=True,
-            limit=None,
         )
 
 
@@ -160,7 +159,6 @@ async def test_calc_passwd_not_found_device(hass: HomeAssistant) -> None:
                 SERVICE_CALC_PASSWD,
                 target={CONF_DEVICE_ID: ["test"]},
                 blocking=True,
-                limit=None,
             )
 
         assert str(error.value) == "Device test not found."
@@ -204,7 +202,6 @@ async def test_calc_passwd_unsupported_device(hass: HomeAssistant) -> None:
                 SERVICE_CALC_PASSWD,
                 target={CONF_DEVICE_ID: [device.id]},
                 blocking=True,
-                limit=None,
             )
 
         assert (
@@ -257,7 +254,6 @@ async def test_calc_passwd_unsupported_device_with_integration(
                 SERVICE_CALC_PASSWD,
                 target={CONF_DEVICE_ID: [device.id]},
                 blocking=True,
-                limit=None,
             )
 
         assert (
@@ -384,7 +380,6 @@ async def test_request(
             },
             target={CONF_DEVICE_ID: [device.id]},
             blocking=True,
-            limit=None,
         )
         await hass.async_block_till_done()
 

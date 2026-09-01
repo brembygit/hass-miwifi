@@ -6,7 +6,7 @@ from datetime import timedelta
 
 import aiohttp
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.components.frontend import async_register_built_in_panel, async_remove_panel
 from homeassistant.components.frontend import DATA_PANELS, Panel
 from homeassistant.helpers.event import async_track_time_interval
@@ -21,6 +21,7 @@ from .const import (
     DEFAULT_PANEL_VERSION,
     MAIN_ROUTER_STORE_FILE,
     PANEL_MONITOR_INTERVAL,
+    PANEL_MONITOR_UNSUB,
 )
 from .logger import _LOGGER
 
@@ -318,8 +319,16 @@ async def async_remove_miwifi_panel(hass: HomeAssistant) -> None:
 
         
 
-async def async_start_panel_monitor(hass):
-    """Start periodic panel version monitoring."""
+async def async_start_panel_monitor(hass) -> None:
+    """Start periodic panel version monitoring, at most one per instance.
+
+    Every entry setup and every options save used to start another one and
+    throw the unsubscribe away, so the timers piled up and outlived the
+    entries that started them.
+    """
+
+    if hass.data.get(PANEL_MONITOR_UNSUB) is not None:
+        return
 
     async def _check_panel_version(now):
         try:
@@ -343,7 +352,18 @@ async def async_start_panel_monitor(hass):
                 _LOGGER.warning, "[MiWiFi] Panel monitor error: %s", describe_error(e)
             )
 
-    async_track_time_interval(hass, _check_panel_version, PANEL_MONITOR_INTERVAL)
+    hass.data[PANEL_MONITOR_UNSUB] = async_track_time_interval(
+        hass, _check_panel_version, PANEL_MONITOR_INTERVAL
+    )
+
+
+@callback
+def async_stop_panel_monitor(hass) -> None:
+    """Cancel the monitor, if this instance has one running."""
+
+    unsub = hass.data.pop(PANEL_MONITOR_UNSUB, None)
+    if unsub is not None:
+        unsub()
 
 
 

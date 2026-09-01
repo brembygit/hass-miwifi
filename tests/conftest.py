@@ -30,11 +30,21 @@ def stub_panel_version():
     teardown as "the test opens sockets".
     """
 
-    with patch(
-        "custom_components.miwifi.frontend.read_local_version",
-        AsyncMock(return_value=DEFAULT_PANEL_VERSION),
+    local = AsyncMock(return_value=DEFAULT_PANEL_VERSION)
+
+    with patch("custom_components.miwifi.frontend.read_local_version", local), patch(
+        # __init__ imported the name, so it holds its own reference.
+        "custom_components.miwifi.read_local_version",
+        local,
     ), patch(
         "custom_components.miwifi.frontend.async_read_remote_version",
+        AsyncMock(return_value=None),
+    ), patch(
+        "custom_components.miwifi.frontend.download_panel_files",
+        AsyncMock(return_value=None),
+    ), patch(
+        # Its 30 second timer would outlive the test and be reported as lingering.
+        "custom_components.miwifi.async_start_panel_monitor",
         AsyncMock(return_value=None),
     ):
         yield

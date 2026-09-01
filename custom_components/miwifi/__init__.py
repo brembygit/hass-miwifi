@@ -59,7 +59,8 @@ from .frontend import (
     async_register_panel,
     async_remove_miwifi_panel,
     read_local_version,
-    async_start_panel_monitor
+    async_start_panel_monitor,
+    async_stop_panel_monitor,
 )
 
 
@@ -230,6 +231,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         others = [e for e in hass.config_entries.async_entries(DOMAIN) if e.entry_id in hass.data.get(DOMAIN, {})]
         if others:
             schedule_auto_purge(hass, others[0], kickoff=False)
+        else:
+            # The panel monitor is per instance, not per entry: it goes when the
+            # last entry does, or its timer outlives the integration.
+            async_stop_panel_monitor(hass)
     return is_unload
 
 

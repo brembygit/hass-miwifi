@@ -95,6 +95,7 @@ MAIN_ROUTER_STORE_FILE = ".storage/miwifi/miwifi_main_router.json"
 MAIN_ROUTER_STORE_VERSION = 1
 
 PANEL_MONITOR_INTERVAL: Final = timedelta(seconds=30)
+PANEL_MONITOR_UNSUB: Final = "miwifi_panel_monitor_unsub"
 
 
 """Default settings"""
