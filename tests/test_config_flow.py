@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from homeassistant import config_entries, data_entry_flow, setup
+from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.const import (
     CONF_IP_ADDRESS,
     CONF_PASSWORD,
@@ -68,7 +69,7 @@ async def test_user(hass: HomeAssistant) -> None:
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
 
-    assert result_init["type"] == data_entry_flow.RESULT_TYPE_FORM
+    assert result_init["type"] == FlowResultType.FORM
     assert result_init["handler"] == DOMAIN
     assert result_init["step_id"] == "discovery_confirm"
 
@@ -263,7 +264,7 @@ async def test_ssdp(hass: HomeAssistant) -> None:
             DOMAIN, context={"source": config_entries.SOURCE_SSDP}
         )
 
-    assert result_init["type"] == data_entry_flow.RESULT_TYPE_ABORT
+    assert result_init["type"] == FlowResultType.ABORT
     assert result_init["handler"] == DOMAIN
     assert result_init["reason"] == "discovery_started"
     assert len(mock_async_start_discovery.mock_calls) == 1
@@ -287,7 +288,7 @@ async def test_dhcp(hass: HomeAssistant) -> None:
             DOMAIN, context={"source": config_entries.SOURCE_DHCP}
         )
 
-    assert result_init["type"] == data_entry_flow.RESULT_TYPE_ABORT
+    assert result_init["type"] == FlowResultType.ABORT
     assert result_init["handler"] == DOMAIN
     assert result_init["reason"] == "discovery_started"
     assert len(mock_async_start_discovery.mock_calls) == 1
@@ -308,7 +309,7 @@ async def test_integration_discovery(hass: HomeAssistant) -> None:
         data={CONF_IP_ADDRESS: MOCK_IP_ADDRESS},
     )
 
-    assert result_init["type"] == data_entry_flow.RESULT_TYPE_FORM
+    assert result_init["type"] == FlowResultType.FORM
     assert result_init["handler"] == DOMAIN
     assert result_init["step_id"] == "discovery_confirm"
 
@@ -352,7 +353,7 @@ async def test_options_flow(hass: HomeAssistant) -> None:
             config_entry.entry_id
         )
 
-        assert result_init["type"] == data_entry_flow.RESULT_TYPE_FORM
+        assert result_init["type"] == FlowResultType.FORM
         assert result_init["step_id"] == "init"
 
         result_save = await hass.config_entries.options.async_configure(
@@ -360,7 +361,7 @@ async def test_options_flow(hass: HomeAssistant) -> None:
             user_input=OPTIONS_FLOW_EDIT_DATA,
         )
 
-    assert result_save["type"] == data_entry_flow.RESULT_TYPE_CREATE_ENTRY
+    assert result_save["type"] == FlowResultType.CREATE_ENTRY
     assert (
         config_entry.options[CONF_IP_ADDRESS] == OPTIONS_FLOW_EDIT_DATA[CONF_IP_ADDRESS]
     )

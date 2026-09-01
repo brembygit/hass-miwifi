@@ -497,7 +497,6 @@ async def test_update_channel_2_4_change_channel(hass: HomeAssistant) -> None:
             SERVICE_SELECT_OPTION,
             {ATTR_ENTITY_ID: [unique_id], ATTR_OPTION: "10"},
             blocking=True,
-            limit=None,
         )
 
         state = hass.states.get(unique_id)
@@ -509,7 +508,6 @@ async def test_update_channel_2_4_change_channel(hass: HomeAssistant) -> None:
             SERVICE_SELECT_OPTION,
             {ATTR_ENTITY_ID: [unique_id], ATTR_OPTION: "10"},
             blocking=True,
-            limit=None,
         )
 
         state = hass.states.get(unique_id)
@@ -912,7 +910,6 @@ async def test_update_channel_5_0_change_channel(hass: HomeAssistant) -> None:
             SERVICE_SELECT_OPTION,
             {ATTR_ENTITY_ID: [unique_id], ATTR_OPTION: "48"},
             blocking=True,
-            limit=None,
         )
 
         state = hass.states.get(unique_id)
@@ -924,7 +921,6 @@ async def test_update_channel_5_0_change_channel(hass: HomeAssistant) -> None:
             SERVICE_SELECT_OPTION,
             {ATTR_ENTITY_ID: [unique_id], ATTR_OPTION: "44"},
             blocking=True,
-            limit=None,
         )
 
         state = hass.states.get(unique_id)
@@ -1266,7 +1262,6 @@ async def test_update_channel_5_0_game_change_channel(hass: HomeAssistant) -> No
             SERVICE_SELECT_OPTION,
             {ATTR_ENTITY_ID: [unique_id], ATTR_OPTION: "36"},
             blocking=True,
-            limit=None,
         )
 
         state = hass.states.get(unique_id)
@@ -1278,7 +1273,6 @@ async def test_update_channel_5_0_game_change_channel(hass: HomeAssistant) -> No
             SERVICE_SELECT_OPTION,
             {ATTR_ENTITY_ID: [unique_id], ATTR_OPTION: "40"},
             blocking=True,
-            limit=None,
         )
 
         state = hass.states.get(unique_id)
@@ -1556,7 +1550,6 @@ async def test_update_strength_2_4_change_strength(hass: HomeAssistant) -> None:
             SERVICE_SELECT_OPTION,
             {ATTR_ENTITY_ID: [unique_id], ATTR_OPTION: "min"},
             blocking=True,
-            limit=None,
         )
 
         state = hass.states.get(unique_id)
@@ -1569,7 +1562,6 @@ async def test_update_strength_2_4_change_strength(hass: HomeAssistant) -> None:
             SERVICE_SELECT_OPTION,
             {ATTR_ENTITY_ID: [unique_id], ATTR_OPTION: "mid"},
             blocking=True,
-            limit=None,
         )
 
         state = hass.states.get(unique_id)
@@ -1847,7 +1839,6 @@ async def test_update_strength_5_0_change_channel(hass: HomeAssistant) -> None:
             SERVICE_SELECT_OPTION,
             {ATTR_ENTITY_ID: [unique_id], ATTR_OPTION: "min"},
             blocking=True,
-            limit=None,
         )
 
         state = hass.states.get(unique_id)
@@ -1860,7 +1851,6 @@ async def test_update_strength_5_0_change_channel(hass: HomeAssistant) -> None:
             SERVICE_SELECT_OPTION,
             {ATTR_ENTITY_ID: [unique_id], ATTR_OPTION: "mid"},
             blocking=True,
-            limit=None,
         )
 
         state = hass.states.get(unique_id)
@@ -2148,7 +2138,6 @@ async def test_update_strength_5_0_game_change_strength(hass: HomeAssistant) -> 
             SERVICE_SELECT_OPTION,
             {ATTR_ENTITY_ID: [unique_id], ATTR_OPTION: "min"},
             blocking=True,
-            limit=None,
         )
 
         state = hass.states.get(unique_id)
@@ -2161,7 +2150,6 @@ async def test_update_strength_5_0_game_change_strength(hass: HomeAssistant) -> 
             SERVICE_SELECT_OPTION,
             {ATTR_ENTITY_ID: [unique_id], ATTR_OPTION: "mid"},
             blocking=True,
-            limit=None,
         )
 
         state = hass.states.get(unique_id)

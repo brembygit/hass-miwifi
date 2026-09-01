@@ -551,7 +551,6 @@ async def test_update_2_4_turn(hass: HomeAssistant) -> None:
             SERVICE_TURN_OFF,
             {ATTR_ENTITY_ID: [unique_id]},
             blocking=True,
-            limit=None,
         )
 
         state = hass.states.get(unique_id)
@@ -564,7 +563,6 @@ async def test_update_2_4_turn(hass: HomeAssistant) -> None:
             SERVICE_TURN_ON,
             {ATTR_ENTITY_ID: [unique_id]},
             blocking=True,
-            limit=None,
         )
 
         state = hass.states.get(unique_id)
@@ -577,7 +575,6 @@ async def test_update_2_4_turn(hass: HomeAssistant) -> None:
             SERVICE_TURN_OFF,
             {ATTR_ENTITY_ID: [unique_id]},
             blocking=True,
-            limit=None,
         )
 
         state = hass.states.get(unique_id)
@@ -590,7 +587,6 @@ async def test_update_2_4_turn(hass: HomeAssistant) -> None:
             SERVICE_TURN_ON,
             {ATTR_ENTITY_ID: [unique_id]},
             blocking=True,
-            limit=None,
         )
 
         state = hass.states.get(unique_id)
@@ -797,7 +793,6 @@ async def test_update_5_0_turn(hass: HomeAssistant) -> None:
             SERVICE_TURN_OFF,
             {ATTR_ENTITY_ID: [unique_id]},
             blocking=True,
-            limit=None,
         )
 
         state = hass.states.get(unique_id)
@@ -810,7 +805,6 @@ async def test_update_5_0_turn(hass: HomeAssistant) -> None:
             SERVICE_TURN_ON,
             {ATTR_ENTITY_ID: [unique_id]},
             blocking=True,
-            limit=None,
         )
 
         state = hass.states.get(unique_id)
@@ -823,7 +817,6 @@ async def test_update_5_0_turn(hass: HomeAssistant) -> None:
             SERVICE_TURN_OFF,
             {ATTR_ENTITY_ID: [unique_id]},
             blocking=True,
-            limit=None,
         )
 
         state = hass.states.get(unique_id)
@@ -836,7 +829,6 @@ async def test_update_5_0_turn(hass: HomeAssistant) -> None:
             SERVICE_TURN_ON,
             {ATTR_ENTITY_ID: [unique_id]},
             blocking=True,
-            limit=None,
         )
 
         state = hass.states.get(unique_id)
@@ -1069,7 +1061,6 @@ async def test_update_5_0_game_turn(hass: HomeAssistant) -> None:
             SERVICE_TURN_OFF,
             {ATTR_ENTITY_ID: [unique_id]},
             blocking=True,
-            limit=None,
         )
 
         state = hass.states.get(unique_id)
@@ -1082,7 +1073,6 @@ async def test_update_5_0_game_turn(hass: HomeAssistant) -> None:
             SERVICE_TURN_ON,
             {ATTR_ENTITY_ID: [unique_id]},
             blocking=True,
-            limit=None,
         )
 
         state = hass.states.get(unique_id)
@@ -1095,7 +1085,6 @@ async def test_update_5_0_game_turn(hass: HomeAssistant) -> None:
             SERVICE_TURN_OFF,
             {ATTR_ENTITY_ID: [unique_id]},
             blocking=True,
-            limit=None,
         )
 
         state = hass.states.get(unique_id)
@@ -1108,7 +1097,6 @@ async def test_update_5_0_game_turn(hass: HomeAssistant) -> None:
             SERVICE_TURN_ON,
             {ATTR_ENTITY_ID: [unique_id]},
             blocking=True,
-            limit=None,
         )
 
         state = hass.states.get(unique_id)
@@ -1373,7 +1361,6 @@ async def test_update_guest_turn(hass: HomeAssistant) -> None:
             SERVICE_TURN_ON,
             {ATTR_ENTITY_ID: [unique_id]},
             blocking=True,
-            limit=None,
         )
 
         state = hass.states.get(unique_id)
@@ -1386,7 +1373,6 @@ async def test_update_guest_turn(hass: HomeAssistant) -> None:
             SERVICE_TURN_OFF,
             {ATTR_ENTITY_ID: [unique_id]},
             blocking=True,
-            limit=None,
         )
 
         state = hass.states.get(unique_id)
@@ -1399,7 +1385,6 @@ async def test_update_guest_turn(hass: HomeAssistant) -> None:
             SERVICE_TURN_ON,
             {ATTR_ENTITY_ID: [unique_id]},
             blocking=True,
-            limit=None,
         )
 
         state = hass.states.get(unique_id)
@@ -1412,7 +1397,6 @@ async def test_update_guest_turn(hass: HomeAssistant) -> None:
             SERVICE_TURN_OFF,
             {ATTR_ENTITY_ID: [unique_id]},
             blocking=True,
-            limit=None,
         )
 
         state = hass.states.get(unique_id)

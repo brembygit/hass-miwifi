@@ -363,7 +363,6 @@ async def test_install(hass: HomeAssistant) -> None:
             SERVICE_INSTALL,
             {ATTR_ENTITY_ID: [unique_id]},
             blocking=True,
-            limit=None,
         )
 
 
@@ -430,7 +429,6 @@ async def test_install_flash_error(hass: HomeAssistant) -> None:
             SERVICE_INSTALL,
             {ATTR_ENTITY_ID: [unique_id]},
             blocking=True,
-            limit=None,
         )
 
 
@@ -496,7 +494,6 @@ async def test_install_error(hass: HomeAssistant) -> None:
                 SERVICE_INSTALL,
                 {ATTR_ENTITY_ID: [unique_id]},
                 blocking=True,
-                limit=None,
             )
 
 

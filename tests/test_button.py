@@ -153,7 +153,6 @@ async def test_update_reboot(hass: HomeAssistant) -> None:
             SERVICE_PRESS,
             {ATTR_ENTITY_ID: [unique_id]},
             blocking=True,
-            limit=None,
         )
 
         assert len(mock_luci_client.mock_calls) == _prev_calls + 1
@@ -163,7 +162,6 @@ async def test_update_reboot(hass: HomeAssistant) -> None:
             SERVICE_PRESS,
             {ATTR_ENTITY_ID: [unique_id]},
             blocking=True,
-            limit=None,
         )
 
         assert len(mock_luci_client.mock_calls) == _prev_calls + 2
