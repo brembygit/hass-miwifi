@@ -3,14 +3,16 @@ calc_passwd:
   description: Calculate default passwd.
   target:
     device:
-      integration: miwifi
+      filter:
+        - integration: miwifi
 
 request:
   name: Send request
   description: Send request to router.
   target:
     device:
-      integration: miwifi
+      filter:
+        - integration: miwifi
   fields:
     uri:
       name: Uri
