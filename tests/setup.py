@@ -11,6 +11,7 @@ from typing import Final
 from unittest.mock import AsyncMock
 
 from homeassistant import setup
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import (
     CONF_IP_ADDRESS,
     CONF_PASSWORD,
@@ -114,6 +115,27 @@ async def async_setup(
     }
 
     return [updater, config_entry]
+
+
+async def async_first_refresh(hass: HomeAssistant, updater: LuciUpdater) -> None:
+    """Run the coordinator's first refresh the way a config entry setup would.
+
+    Home Assistant only allows `async_config_entry_first_refresh` while the entry
+    is in SETUP_IN_PROGRESS. These tests drive the updater directly instead of
+    going through `hass.config_entries.async_setup`, so the state is set around
+    the call and put back afterwards - some of the callers go on to set the entry
+    up for real, which in turn requires NOT_LOADED.
+
+    :param hass: HomeAssistant
+    :param updater: LuciUpdater
+    """
+
+    config_entry = updater.config_entry
+    config_entry.mock_state(hass, ConfigEntryState.SETUP_IN_PROGRESS)
+    try:
+        await updater.async_config_entry_first_refresh()
+    finally:
+        config_entry.mock_state(hass, ConfigEntryState.NOT_LOADED)
 
 
 async def async_mock_luci_client(mock_luci_client) -> None:

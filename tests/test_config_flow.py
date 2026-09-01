@@ -20,6 +20,9 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry, load_fixture
 
+# Imported for its side effect: the tests below patch attributes of this
+# module by path, which only resolves once it has been imported.
+from custom_components.miwifi import config_flow  # noqa: F401
 from custom_components.miwifi.const import (
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_TIMEOUT,

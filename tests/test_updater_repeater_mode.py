@@ -79,7 +79,12 @@ from custom_components.miwifi.const import (
 )
 from custom_components.miwifi.enum import Connection, Mode, Model
 from custom_components.miwifi.updater import LuciUpdater
-from tests.setup import MultipleSideEffect, async_mock_luci_client, async_setup
+from tests.setup import (
+    MultipleSideEffect,
+    async_first_refresh,
+    async_mock_luci_client,
+    async_setup,
+)
 
 MOCK_IP_ADDRESS: Final = "192.168.31.1"
 MOCK_PASSWORD: Final = "**REDACTED**"
@@ -120,7 +125,7 @@ async def test_updater_repeater_mode(
 
         updater: LuciUpdater = setup_data[0]
 
-        await updater.async_config_entry_first_refresh()
+        await async_first_refresh(hass, updater)
         await updater.async_stop()
 
         await hass.async_block_till_done()
@@ -280,7 +285,7 @@ async def test_updater_repeater_mode_force_load(
 
         config_entry: MockConfigEntry = setup_data[1]
 
-        await updater.async_config_entry_first_refresh()
+        await async_first_refresh(hass, updater)
         await hass.async_block_till_done()
 
         await updater.update()
@@ -483,7 +488,7 @@ async def test_updater_repeater_mode_move(hass: HomeAssistant) -> None:
         updater_first: LuciUpdater = setup_data[0]
         config_entry_first: MockConfigEntry = setup_data[1]
 
-        await updater_first.async_config_entry_first_refresh()
+        await async_first_refresh(hass, updater_first)
         await updater_first.async_stop()
 
         await hass.async_block_till_done()
@@ -506,7 +511,7 @@ async def test_updater_repeater_mode_move(hass: HomeAssistant) -> None:
         updater_second: LuciUpdater = setup_data[0]
         config_entry_second: MockConfigEntry = setup_data[1]
 
-        await updater_second.async_config_entry_first_refresh()
+        await async_first_refresh(hass, updater_second)
         await hass.async_block_till_done()
 
         await updater_second.update()
@@ -666,7 +671,7 @@ async def test_updater_repeater_mode_revert_move(
         updater_first: LuciUpdater = setup_data[0]
         config_entry_first: MockConfigEntry = setup_data[1]
 
-        await updater_first.async_config_entry_first_refresh()
+        await async_first_refresh(hass, updater_first)
         await updater_first.async_stop()
 
         await hass.async_block_till_done()
@@ -695,7 +700,7 @@ async def test_updater_repeater_mode_revert_move(
         updater_second: LuciUpdater = setup_data[0]
         config_entry_second: MockConfigEntry = setup_data[1]
 
-        await updater_second.async_config_entry_first_refresh()
+        await async_first_refresh(hass, updater_second)
         await hass.async_block_till_done()
 
     assert len(updater_first.devices) == 1
@@ -974,7 +979,7 @@ async def test_updater_repeater_mode_revert_move_force_mode(
         updater_first: LuciUpdater = setup_data[0]
         config_entry_first: MockConfigEntry = setup_data[1]
 
-        await updater_first.async_config_entry_first_refresh()
+        await async_first_refresh(hass, updater_first)
         await hass.async_block_till_done()
 
     with patch(
@@ -995,7 +1000,7 @@ async def test_updater_repeater_mode_revert_move_force_mode(
         updater_second: LuciUpdater = setup_data[0]
         config_entry_second: MockConfigEntry = setup_data[1]
 
-        await updater_second.async_config_entry_first_refresh()
+        await async_first_refresh(hass, updater_second)
         await hass.async_block_till_done()
 
     assert len(updater_first.devices) == 1
@@ -1277,7 +1282,7 @@ async def test_updater_repeater_mode_move_force_mode(hass: HomeAssistant) -> Non
         updater_first.is_force_load = True
         config_entry_first: MockConfigEntry = setup_data[1]
 
-        await updater_first.async_config_entry_first_refresh()
+        await async_first_refresh(hass, updater_first)
 
         await hass.async_block_till_done()
 
@@ -1299,7 +1304,7 @@ async def test_updater_repeater_mode_move_force_mode(hass: HomeAssistant) -> Non
         updater_second: LuciUpdater = setup_data[0]
         config_entry_second: MockConfigEntry = setup_data[1]
 
-        await updater_second.async_config_entry_first_refresh()
+        await async_first_refresh(hass, updater_second)
         await hass.async_block_till_done()
 
         await updater_second.update()
@@ -1445,7 +1450,7 @@ async def test_updater_repeater_mode_restore(hass: HomeAssistant) -> None:
         updater_first: LuciUpdater = setup_data[0]
         config_entry_first: MockConfigEntry = setup_data[1]
 
-        await updater_first.async_config_entry_first_refresh()
+        await async_first_refresh(hass, updater_first)
         await updater_first.async_stop()
 
         await hass.async_block_till_done()
@@ -1479,7 +1484,7 @@ async def test_updater_repeater_mode_restore(hass: HomeAssistant) -> None:
         updater_second: LuciUpdater = setup_data[0]
         config_entry_second: MockConfigEntry = setup_data[1]
 
-        await updater_second.async_config_entry_first_refresh()
+        await async_first_refresh(hass, updater_second)
         await hass.async_block_till_done()
 
         await updater_second.update()
@@ -1671,7 +1676,7 @@ async def test_updater_repeater_mode_restore_force_mode(hass: HomeAssistant) -> 
         updater_first.is_force_load = True
         config_entry_first: MockConfigEntry = setup_data[1]
 
-        await updater_first.async_config_entry_first_refresh()
+        await async_first_refresh(hass, updater_first)
         await updater_first.async_stop()
 
         await hass.async_block_till_done()
@@ -1705,7 +1710,7 @@ async def test_updater_repeater_mode_restore_force_mode(hass: HomeAssistant) -> 
         updater_second: LuciUpdater = setup_data[0]
         config_entry_second: MockConfigEntry = setup_data[1]
 
-        await updater_second.async_config_entry_first_refresh()
+        await async_first_refresh(hass, updater_second)
         await hass.async_block_till_done()
 
         await updater_second.update()
@@ -1845,7 +1850,7 @@ async def test_updater_ap_mode_force_load_incorrect_type(hass: HomeAssistant) ->
 
         config_entry: MockConfigEntry = setup_data[1]
 
-        await updater.async_config_entry_first_refresh()
+        await async_first_refresh(hass, updater)
         await hass.async_block_till_done()
 
         await updater.update()
