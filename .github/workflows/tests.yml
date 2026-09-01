@@ -42,10 +42,25 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements_test.txt
           pip install "pytest-homeassistant-custom-component==${{ matrix.phacc }}"
+          # Turns test failures into GitHub annotations, which are readable
+          # without a token - unlike the job logs.
+          pip install pytest-github-actions-annotate-failures
           python -c "import homeassistant; from importlib.metadata import version; print('homeassistant', version('homeassistant'))"
 
       - name: Compile
         run: python -m compileall -q custom_components/miwifi
 
       - name: Pytest
-        run: pytest -q --cov=custom_components/miwifi --cov-report=term-missing
+        run: |
+          pytest -q --continue-on-collection-errors             --cov=custom_components/miwifi --cov-report=term-missing 2>&1 | tee pytest.log
+
+      - name: Surface the summary as annotations
+        if: failure()
+        run: |
+          {
+            grep -E '^(FAILED|ERROR) ' pytest.log | head -20
+            grep -E '^E   [A-Za-z_.]*(Error|Exception)' pytest.log | sort -u | head -10
+            tail -3 pytest.log
+          } | while IFS= read -r line; do
+            echo "::error::${line}"
+          done
