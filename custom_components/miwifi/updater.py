@@ -30,6 +30,7 @@ from homeassistant.helpers.httpx_client import get_async_client
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.helpers.translation import async_get_translations
+from homeassistant.helpers.typing import UNDEFINED
 from homeassistant.util import utcnow
 from httpx import codes
 
@@ -195,6 +196,7 @@ class LuciUpdater(DataUpdateCoordinator):
         entry_id: str | None = None,
         protocol: str = DEFAULT_PROTOCOL,
         is_ap_mode: bool = False,
+        config_entry=None,
     ) -> None:
         """Initialize updater.
 
@@ -212,6 +214,7 @@ class LuciUpdater(DataUpdateCoordinator):
         :param entry_id: str | None: Entry ID
         :param protocol: str: Connection protocol (auto, http, https)
         :param is_ap_mode: bool: Node runs as access point / mesh node behind a foreign gateway
+        :param config_entry: ConfigEntry | None: Entry owning this coordinator
         """
 
         client_factory = lambda: get_async_client(hass, False)
@@ -264,6 +267,10 @@ class LuciUpdater(DataUpdateCoordinator):
                 name=f"{NAME} updater",
                 update_interval=self._update_interval,
                 update_method=self.update,
+                # async_config_entry_first_refresh() requires the coordinator to
+                # know its entry. Home Assistant can infer it from the setup
+                # context, but only there - pass it whenever we have it.
+                config_entry=config_entry if config_entry is not None else UNDEFINED,
             )
 
         self.data: dict[str, Any] = {}

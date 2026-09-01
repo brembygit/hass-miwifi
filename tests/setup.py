@@ -91,6 +91,7 @@ async def async_setup(
         activity_days,
         None if without_store else get_store(hass, _ip),
         entry_id=config_entry.entry_id,
+        config_entry=config_entry,
     )
 
     @callback
