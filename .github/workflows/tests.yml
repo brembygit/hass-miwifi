@@ -26,13 +26,16 @@ jobs:
             experimental: true
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           # pytest-homeassistant-custom-component requires >=3.14
           python-version: "3.14"
           cache: pip
+          # The repo has no requirements.txt or pyproject.toml, which is all the
+          # pip cache looks for by default.
+          cache-dependency-path: requirements_test.txt
 
       - name: Install test requirements
         run: |
