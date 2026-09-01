@@ -93,7 +93,9 @@ from .const import (
     ATTR_STATE,
     CONF_WAN_SPEED_UNIT,
     DEFAULT_WAN_SPEED_UNIT,
+    DEVICE_SENSORS_ADDED,
     DOMAIN,
+    SENSORS_ADDED,
     UPDATER,
     ATTR_TRACKER_ROUTER_MAC_ADDRESS,
     ATTR_TRACKER_UPDATER_ENTRY_ID,
@@ -989,6 +991,12 @@ async def async_setup_entry(
         if not mac:
             return
 
+        # The deferred task below adds a sensor set for every device it already
+        # knows about, and it keeps refreshing while it waits - so the same MAC
+        # can arrive here and there. Claim it once, whoever gets there first.
+        if not _claim_device(hass, config_entry, mac):
+            return
+
         # On restart entities may exist in registry but must be instantiated again.
         to_add: list[SensorEntity] = _build_device_sensors(updater, new_device)
         if to_add:
@@ -1130,6 +1138,22 @@ class MiWifiConfigSensor(CoordinatorEntity, SensorEntity):
         self.async_write_ha_state()
 
 
+def _claim_device(hass: HomeAssistant, config_entry: ConfigEntry, mac: str) -> bool:
+    """Register a MAC as handled, and report whether the caller won the claim."""
+
+    entry_data = (hass.data.get(DOMAIN) or {}).get(config_entry.entry_id)
+    if entry_data is None:
+        return False
+
+    claimed: set[str] = entry_data.setdefault(DEVICE_SENSORS_ADDED, set())
+    normalised = mac.upper()
+    if normalised in claimed:
+        return False
+
+    claimed.add(normalised)
+    return True
+
+
 async def _async_add_all_sensors_later(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
@@ -1152,6 +1176,16 @@ async def _async_add_all_sensors_later(
             break
 
         await asyncio.sleep(2)
+
+    # Claim the router sensor set for this entry. A reload can leave the previous
+    # setup's task waiting here while the new setup starts its own, and both would
+    # then add the same unique_ids to the same entry - which is what Home Assistant
+    # reports as "does not generate unique IDs". The claim lives in the entry data,
+    # so unloading the entry clears it.
+    entry_data = (hass.data.get(DOMAIN) or {}).get(config_entry.entry_id)
+    if entry_data is None or entry_data.get(SENSORS_ADDED):
+        return
+    entry_data[SENSORS_ADDED] = True
 
     _warn_on_shared_router_mac(hass, config_entry, updater)
 
@@ -1209,6 +1243,8 @@ async def _async_add_all_sensors_later(
         for device in (updater.devices or {}).values():
             mac = str(device.get(ATTR_TRACKER_MAC, "")).strip()
             if not mac:
+                continue
+            if not _claim_device(hass, config_entry, mac):
                 continue
             entities.extend(_build_device_sensors(updater, device))
 

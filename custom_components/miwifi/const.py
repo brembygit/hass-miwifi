@@ -35,6 +35,10 @@ DIAGNOSTIC_CONTENT: Final = "content"
 """Helper const"""
 UPDATER: Final = "updater"
 UPDATE_LISTENER: Final = "update_listener"
+# The sensor platform creates its entities from a deferred task, so it has to
+# record what it already added: a reload can leave the previous run pending.
+SENSORS_ADDED: Final = "sensors_added"
+DEVICE_SENSORS_ADDED: Final = "device_sensors_added"
 OPTION_IS_FROM_FLOW: Final = "is_from_flow"
 STORAGE_VERSION: Final = 1
 

@@ -208,10 +208,12 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     except Exception as e:
          await hass.async_add_executor_job(_LOGGER.warning, f"[MiWiFi] Error managing the panel: {e}")
 
-    await asyncio.gather(*[
-        hass.config_entries.async_reload(e.entry_id)
-        for e in hass.config_entries.async_entries(DOMAIN)
-    ])
+    # Reload this entry only. The global settings are written onto every entry by
+    # apply_config, so this listener already fires once per entry: reloading all
+    # of them from each listener turned one save into sixteen overlapping
+    # reloads, and overlapping reloads of the same entry are what let two sensor
+    # setups run against it at once.
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
