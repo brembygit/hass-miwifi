@@ -12,22 +12,12 @@
   "config_flow": true,
   "iot_class": "local_polling",
   "quality_scale": "platinum",
-  "frontend": true,
-  "static_dir": "www",
   "ssdp": [
     {
       "st": "upnp:rootdevice",
       "manufacturer": "Xiaomi",
       "deviceType": "urn:schemas-upnp-org:device:InternetGatewayDevice:1"
     }
-  ],
-  "platforms": [
-    "sensor",
-    "button",
-    "light",
-    "switch",
-    "select",
-    "device_tracker"
   ],
   "dhcp": [
     { "hostname": "miwifi-*", "macaddress": "C85CCC*" },
