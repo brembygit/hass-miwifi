@@ -1022,8 +1022,14 @@ async def async_setup_entry(
     )
 
     # Defer initial entity creation to avoid blocking startup.
-    hass.async_create_task(
-        _async_add_all_sensors_later(hass, config_entry, async_add_entities)
+    # Tie it to the entry: this task waits up to ~12s for the topology, and on a
+    # reload a leftover one would call async_add_entities() for a platform that
+    # is already gone while the new setup adds the same sensors - which is what
+    # produced "does not generate unique IDs" for a single entry.
+    config_entry.async_create_task(
+        hass,
+        _async_add_all_sensors_later(hass, config_entry, async_add_entities),
+        name=f"{DOMAIN} deferred sensors",
     )
 
 class MiWifiNATRulesSensor(CoordinatorEntity, SensorEntity):

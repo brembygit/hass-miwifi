@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import inspect
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -16,7 +17,7 @@ from custom_components.miwifi.const import (
 )
 from custom_components.miwifi.enum import Mode
 from custom_components.miwifi.exceptions import LuciConnectionError
-from custom_components.miwifi.updater import AP_MODE_SKIP_METHODS, PREPARE_METHODS, LuciUpdater
+from custom_components.miwifi.updater import PREPARE_METHODS, LuciUpdater
 
 
 def _updater(is_ap_mode: bool) -> LuciUpdater:
@@ -47,13 +48,17 @@ def test_option_defaults_to_off() -> None:
     assert DEFAULT_IS_AP_MODE is False
 
 
-def test_skipped_methods_are_gateway_only() -> None:
-    """The skip list names real prepare steps and leaves client data alone."""
+def test_client_facing_steps_are_never_skipped() -> None:
+    """Only the gateway steps are guarded; client data keeps flowing."""
 
-    assert set(AP_MODE_SKIP_METHODS) == {"mode", "wan"}
-    assert set(AP_MODE_SKIP_METHODS).issubset(set(PREPARE_METHODS))
-    for method in ("devices", "device_list", "ap", "status"):
-        assert method not in AP_MODE_SKIP_METHODS
+    for method in ("mode", "wan", "devices", "device_list", "ap", "status"):
+        assert method in PREPARE_METHODS
+
+    source = inspect.getsource(LuciUpdater.update)
+
+    # The guards live in the prepare methods, not in the dispatch loop: a loop
+    # level skip would shadow them and never let the mode be set.
+    assert "is_ap_mode" not in source
 
 
 @pytest.mark.asyncio
