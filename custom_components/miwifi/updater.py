@@ -140,6 +140,10 @@ PREPARE_METHODS: Final = (
     "new_status",
 )
 
+# Gateway only prepare methods: an access point / mesh node behind a foreign
+# router answers none of them, so asking only produces timeouts and log noise.
+AP_MODE_SKIP_METHODS: Final = ("mode", "wan")
+
 NEW_STATUS_MAP: Final = {
     "2g": ATTR_SENSOR_DEVICES_2_4,
     "5g": ATTR_SENSOR_DEVICES_5_0,
@@ -165,6 +169,7 @@ class LuciUpdater(DataUpdateCoordinator):
     ip: str
     new_device_callback: CALLBACK_TYPE | None = None
     is_force_load: bool = False
+    is_ap_mode: bool = False
     supports_guest: bool = True
 
     _store: Store | None = None
@@ -189,6 +194,7 @@ class LuciUpdater(DataUpdateCoordinator):
         is_only_login: bool = False,
         entry_id: str | None = None,
         protocol: str = DEFAULT_PROTOCOL,
+        is_ap_mode: bool = False,
     ) -> None:
         """Initialize updater.
 
@@ -205,6 +211,7 @@ class LuciUpdater(DataUpdateCoordinator):
         :param is_only_login: bool: Only config flow
         :param entry_id: str | None: Entry ID
         :param protocol: str: Connection protocol (auto, http, https)
+        :param is_ap_mode: bool: Node runs as access point / mesh node behind a foreign gateway
         """
 
         client_factory = lambda: get_async_client(hass, False)
@@ -222,6 +229,7 @@ class LuciUpdater(DataUpdateCoordinator):
         self.ip = ip  # pylint: disable=invalid-name
         self.timeout = timeout
         self.is_force_load = is_force_load
+        self.is_ap_mode = is_ap_mode
         self._entry_id = entry_id
         self._scan_interval = scan_interval
         self._activity_days = activity_days
@@ -301,6 +309,7 @@ class LuciUpdater(DataUpdateCoordinator):
 
         _is_before_reauthorization: bool = self._is_reauthorization
         _err: LuciError | None = None
+        _method: str = "login"
 
         try:
             if self._is_reauthorization or self._is_only_login or self._is_first_update:
@@ -321,19 +330,26 @@ class LuciUpdater(DataUpdateCoordinator):
 
                     if method in ("devices", "device_list") and "new_status" in self.data and self.is_force_load:
                         continue
+
+                    # Access point / mesh nodes are not the WAN gateway: these
+                    # endpoints only ever time out there.
+                    if self.is_ap_mode and method in AP_MODE_SKIP_METHODS:
+                        continue
+
+                    _method = method
                     await self._async_prepare(method, self.data)
 
         except LuciConnectionError as _e:
             _err = _e
             self._is_reauthorization = False
             self.code = codes.NOT_FOUND
-            await self.hass.async_add_executor_job(_LOGGER.warning, "[MiWiFi] LuciConnectionError en login: %s", _e)
-            
+            await self.hass.async_add_executor_job(_LOGGER.warning, "[MiWiFi] LuciConnectionError on %s (%s): %s", _method, self.ip, _e)
+
         except LuciRequestError as _e:
             _err = _e
             self._is_reauthorization = True
             self.code = codes.FORBIDDEN
-            await self.hass.async_add_executor_job(_LOGGER.warning, "[MiWiFi] LuciRequestError en login: %s", _e)
+            await self.hass.async_add_executor_job(_LOGGER.warning, "[MiWiFi] LuciRequestError on %s (%s): %s", _method, self.ip, _e)
 
 
         else:
@@ -839,6 +855,11 @@ class LuciUpdater(DataUpdateCoordinator):
         if data.get(ATTR_SENSOR_MODE, Mode.DEFAULT) == Mode.MESH:
             return
 
+        # Declared access point: the gateway mode probe has nothing to answer.
+        if self.is_ap_mode:
+            data[ATTR_SENSOR_MODE] = Mode.DEFAULT
+            return
+
         # ✅ CB0401V2: skip mode endpoint (often dead/404 on provider firmware)
         if self._is_cb0401v2_device(data):
             data[ATTR_SENSOR_MODE] = Mode.DEFAULT
@@ -1045,6 +1066,9 @@ class LuciUpdater(DataUpdateCoordinator):
                     return v
             return None
 
+        if self.is_ap_mode:
+            return
+
         try:
             response: dict = await asyncio.wait_for(self.luci.wan_info(), timeout=6)
 
@@ -1140,8 +1164,11 @@ class LuciUpdater(DataUpdateCoordinator):
                     data[ATTR_SENSOR_WAN_IP] = mobile_ip.strip()
                     data[ATTR_SENSOR_WAN_TYPE] = "mobile"
 
-        except Exception as e:
-            await self.hass.async_add_executor_job(_LOGGER.error, "Error while preparing WAN info: %s", e)
+        # LuciError derives from BaseException: without naming it here a WAN
+        # failure escaped this handler and aborted the whole update cycle, so
+        # every prepare step after "wan" (devices included) was skipped.
+        except (Exception, LuciError) as e:
+            await self.hass.async_add_executor_job(_LOGGER.error, "Error while preparing WAN info for %s: %s", self.ip, e)
             data[ATTR_BINARY_SENSOR_WAN_STATE] = False
             data[ATTR_BINARY_SENSOR_WAN_LINK] = False
             data[ATTR_SENSOR_WAN_IP] = None
@@ -1349,7 +1376,8 @@ class LuciUpdater(DataUpdateCoordinator):
 
         # cooldown: si falló hace poco, no insistimos cada scan
         next_try = getattr(self, "_macfilter_next_try", now)
-        if now >= next_try:
+        # MAC filtering lives on the gateway, never on an access point node.
+        if not self.is_ap_mode and now >= next_try:
             call_timeout = self._macfilter_call_timeout()
             try:
                 # Usa timeout real del request (httpx) y evita doble timeout agresivo
