@@ -141,10 +141,6 @@ PREPARE_METHODS: Final = (
     "new_status",
 )
 
-# Gateway only prepare methods: an access point / mesh node behind a foreign
-# router answers none of them, so asking only produces timeouts and log noise.
-AP_MODE_SKIP_METHODS: Final = ("mode", "wan")
-
 NEW_STATUS_MAP: Final = {
     "2g": ATTR_SENSOR_DEVICES_2_4,
     "5g": ATTR_SENSOR_DEVICES_5_0,
@@ -336,17 +332,6 @@ class LuciUpdater(DataUpdateCoordinator):
                         continue
 
                     if method in ("devices", "device_list") and "new_status" in self.data and self.is_force_load:
-                        continue
-
-                    # Access point / mesh nodes are not the WAN gateway: these
-                    # endpoints only ever time out there.
-                    if self.is_ap_mode and method in AP_MODE_SKIP_METHODS:
-                        await self.hass.async_add_executor_job(
-                            _LOGGER.debug,
-                            "[MiWiFi] AP mode: skipping '%s' for %s",
-                            method,
-                            self.ip,
-                        )
                         continue
 
                     _method = method
@@ -874,6 +859,9 @@ class LuciUpdater(DataUpdateCoordinator):
         # its own device list and resetting the client counters.
         if self.is_ap_mode:
             data[ATTR_SENSOR_MODE] = Mode.ACCESS_POINT
+            await self.hass.async_add_executor_job(
+                _LOGGER.debug, "[MiWiFi] AP mode: skipping 'mode' for %s", self.ip
+            )
             return
 
         # ✅ CB0401V2: skip mode endpoint (often dead/404 on provider firmware)
@@ -1083,6 +1071,9 @@ class LuciUpdater(DataUpdateCoordinator):
             return None
 
         if self.is_ap_mode:
+            await self.hass.async_add_executor_job(
+                _LOGGER.debug, "[MiWiFi] AP mode: skipping 'wan' for %s", self.ip
+            )
             return
 
         try:
