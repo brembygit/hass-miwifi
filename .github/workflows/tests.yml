@@ -58,11 +58,15 @@ jobs:
         run: python -m compileall -q custom_components/miwifi
 
       - name: Pytest
+        # Explicit "shell: bash" is what turns on pipefail; the default
+        # "bash -e" would take tee's exit code and report a red run as green.
+        shell: bash
         run: |
           pytest -q --continue-on-collection-errors             --cov=custom_components/miwifi --cov-report=term-missing 2>&1 | tee pytest.log
 
       - name: Surface the summary as annotations
         if: failure()
+        shell: bash
         run: |
           {
             grep -E '^(FAILED|ERROR) ' pytest.log | head -20
