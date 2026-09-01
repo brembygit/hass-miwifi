@@ -2,12 +2,15 @@
 
 import os
 import json
+from datetime import timedelta
+
 import aiohttp
 
 from homeassistant.core import HomeAssistant
 from homeassistant.components.frontend import async_register_built_in_panel, async_remove_panel
 from homeassistant.components.frontend import DATA_PANELS, Panel
 from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.util import dt as dt_util
 
 from .const import (
     PANEL_REPO_VERSION_URL,
@@ -55,6 +58,84 @@ async def read_remote_version(session: aiohttp.ClientSession) -> str:
         text = await resp.text()
         data = json.loads(text)
         return data.get("version", "0.0")
+
+
+PANEL_VERSION_STATE: str = "miwifi_panel_version_state"
+PANEL_VERSION_CACHE_TTL: timedelta = timedelta(minutes=15)
+PANEL_VERSION_BACKOFF_START: timedelta = timedelta(minutes=5)
+PANEL_VERSION_BACKOFF_MAX: timedelta = timedelta(hours=6)
+
+
+def describe_error(err: BaseException) -> str:
+    """Describe an error in a way that is never empty.
+
+    aiohttp errors stringify to "" more often than not, which is how the panel
+    version warning ended up with nothing after the colon.
+    """
+
+    status = getattr(err, "status", None)
+    if status is not None:
+        return f"HTTP {status} ({type(err).__name__})"
+
+    return repr(err)
+
+
+async def async_read_remote_version(
+    hass: HomeAssistant, session: aiohttp.ClientSession
+) -> str | None:
+    """Read the published panel version, cached and backed off on failure.
+
+    Every updater cycle of every entry asks for this version, so a rate limited
+    or unreachable repository used to produce a burst of warnings. Serve a
+    cached answer, back off after a failure, and report each failure window once
+    with a reason that actually says what happened.
+
+    :return str | None: the version, or None while it could not be read.
+    """
+
+    state: dict = hass.data.setdefault(PANEL_VERSION_STATE, {})
+    now = dt_util.utcnow()
+
+    valid_until = state.get("valid_until")
+    if state.get("version") and valid_until and now < valid_until:
+        return state["version"]
+
+    retry_after = state.get("retry_after")
+    if retry_after and now < retry_after:
+        return state.get("version")
+
+    try:
+        version = await read_remote_version(session)
+    except Exception as err:  # noqa: BLE001 - reported, never re-raised
+        backoff = state.get("backoff") or PANEL_VERSION_BACKOFF_START
+        if state.get("backoff"):
+            backoff = min(backoff * 2, PANEL_VERSION_BACKOFF_MAX)
+
+        state["backoff"] = backoff
+        state["retry_after"] = now + backoff
+
+        if not state.get("failure_logged"):
+            state["failure_logged"] = True
+            await hass.async_add_executor_job(
+                _LOGGER.warning,
+                "[MiWiFi] The frontend panel version could not be read: %s. Retrying in %s",
+                describe_error(err),
+                backoff,
+            )
+
+        return state.get("version")
+
+    state.update(
+        {
+            "version": version,
+            "valid_until": now + PANEL_VERSION_CACHE_TTL,
+            "backoff": None,
+            "retry_after": None,
+            "failure_logged": False,
+        }
+    )
+
+    return version
 
 
 async def read_remote_files(session: aiohttp.ClientSession) -> list:
@@ -244,7 +325,10 @@ async def async_start_panel_monitor(hass):
         try:
             local = await read_local_version(hass)
             async with aiohttp.ClientSession() as session:
-                remote = await read_remote_version(session)
+                remote = await async_read_remote_version(hass, session)
+
+            if remote is None:
+                return
 
             if local != remote:
                 await hass.async_add_executor_job(_LOGGER.warning, f"[MiWiFi] New panel version available: {remote} (local: {local})")
@@ -255,7 +339,9 @@ async def async_start_panel_monitor(hass):
                     hass.data["miwifi_last_checked_version"] = local
 
         except Exception as e:
-            await hass.async_add_executor_job(_LOGGER.warning, f"[MiWiFi] Panel monitor error: {e}")
+            await hass.async_add_executor_job(
+                _LOGGER.warning, "[MiWiFi] Panel monitor error: %s", describe_error(e)
+            )
 
     async_track_time_interval(hass, _check_panel_version, PANEL_MONITOR_INTERVAL)
 

@@ -386,15 +386,19 @@ class LuciUpdater(DataUpdateCoordinator):
             await self._async_prepare_nat_rules()
         
         # Panel frontend version check (local + remote)
+        from .frontend import async_read_remote_version, describe_error, read_local_version
+
         try:
-            from .frontend import read_local_version, read_remote_version
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
                 local = await read_local_version(self.hass)
-                remote = await read_remote_version(session)
+                # Cached and backed off inside the frontend helper: a rate
+                # limited repository must not warn once per poll cycle.
+                remote = await async_read_remote_version(self.hass, session)
                 self.data["panel_local_version"] = local
-                self.data["panel_remote_version"] = remote
+                if remote is not None:
+                    self.data["panel_remote_version"] = remote
         except Exception as e:
-            await self.hass.async_add_executor_job(_LOGGER.warning, "[MiWiFi] The frontend panel version could not be updated: %s", e)
+            await self.hass.async_add_executor_job(_LOGGER.warning, "[MiWiFi] The frontend panel version could not be updated: %s", describe_error(e))
 
         if self._is_only_login:
             await self.hass.async_add_executor_job(_LOGGER.debug, "[MiWiFi] Finalizó login (is_only_login), código=%s, data[ATTR_STATE]=%s", self.code, self.data.get(ATTR_STATE))
