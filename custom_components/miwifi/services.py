@@ -57,6 +57,20 @@ from .unsupported import (
     parse_model,
 )
 
+def _has_domain_identifier(identifiers) -> bool:
+    """Check for a MiWiFi identifier without assuming a fixed tuple arity."""
+
+    return any(t and t[0] == DOMAIN for t in identifiers)
+
+
+def _domain_identifier_values(identifiers):
+    """Yield the id part of every MiWiFi identifier, skipping malformed ones."""
+
+    for t in identifiers:
+        if t and t[0] == DOMAIN and len(t) >= 2:
+            yield t[1]
+
+
 class _I18nMixin:
     async def _t(self, key: str, default: str = "", **fmt) -> str:
     
@@ -1579,7 +1593,7 @@ class MiWifiPurgeInactiveDevicesServiceCall:
         orphan_targets: list[tuple[str, str | None, float | None]] = []
         if include_orphans:
             for device in list(dev_reg.devices.values()):
-                if not any(dom == DOMAIN for (dom, _id) in device.identifiers):
+                if not _has_domain_identifier(device.identifiers):
                     continue
 
                 ents = er.async_entries_for_device(ent_reg, device.id, include_disabled_entities=True)
@@ -1588,8 +1602,8 @@ class MiWifiPurgeInactiveDevicesServiceCall:
                     continue
 
                 mac: str | None = None
-                for dom, ident in device.identifiers:
-                    if dom == DOMAIN and isinstance(ident, str) and ":" in ident:
+                for ident in _domain_identifier_values(device.identifiers):
+                    if isinstance(ident, str) and ":" in ident:
                         mac = self._mac_from_unique_id(ident)
                         break
 
@@ -1640,7 +1654,7 @@ class MiWifiPurgeInactiveDevicesServiceCall:
                 if not dev:
                     continue
    
-                if not any(dom == DOMAIN for (dom, _id) in dev.identifiers):
+                if not _has_domain_identifier(dev.identifiers):
                     continue
 
                 if len(dev.config_entries) > 1:
