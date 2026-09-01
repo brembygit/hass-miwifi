@@ -58,7 +58,7 @@ def test_skipped_methods_are_gateway_only() -> None:
 
 @pytest.mark.asyncio
 async def test_mode_probe_skipped_in_ap_mode() -> None:
-    """The gateway mode probe is not sent, and mode stays at the default."""
+    """The probe is not sent, and the node is declared an access point."""
 
     updater = _updater(True)
     updater.luci.mode = AsyncMock()
@@ -67,7 +67,20 @@ async def test_mode_probe_skipped_in_ap_mode() -> None:
     await updater._async_prepare_mode(data)
 
     updater.luci.mode.assert_not_awaited()
-    assert data[ATTR_SENSOR_MODE] == Mode.DEFAULT
+    assert data[ATTR_SENSOR_MODE] == Mode.ACCESS_POINT
+
+
+@pytest.mark.asyncio
+async def test_ap_mode_stops_the_node_counting_as_a_gateway() -> None:
+    """is_repeater reads the mode, so AP mode has to move it above zero."""
+
+    updater = _updater(True)
+    updater.luci.mode = AsyncMock()
+
+    await updater._async_prepare_mode(updater.data)
+
+    assert updater.data[ATTR_SENSOR_MODE].value > 0
+    assert LuciUpdater.is_repeater.fget(updater) is True
 
 
 @pytest.mark.asyncio

@@ -341,6 +341,12 @@ class LuciUpdater(DataUpdateCoordinator):
                     # Access point / mesh nodes are not the WAN gateway: these
                     # endpoints only ever time out there.
                     if self.is_ap_mode and method in AP_MODE_SKIP_METHODS:
+                        await self.hass.async_add_executor_job(
+                            _LOGGER.debug,
+                            "[MiWiFi] AP mode: skipping '%s' for %s",
+                            method,
+                            self.ip,
+                        )
                         continue
 
                     _method = method
@@ -862,9 +868,12 @@ class LuciUpdater(DataUpdateCoordinator):
         if data.get(ATTR_SENSOR_MODE, Mode.DEFAULT) == Mode.MESH:
             return
 
-        # Declared access point: the gateway mode probe has nothing to answer.
+        # Declared access point: the gateway mode probe has nothing to answer,
+        # and the node must stop being treated as a gateway. is_repeater reads
+        # ATTR_SENSOR_MODE, so this is also what stops the leaf from persisting
+        # its own device list and resetting the client counters.
         if self.is_ap_mode:
-            data[ATTR_SENSOR_MODE] = Mode.DEFAULT
+            data[ATTR_SENSOR_MODE] = Mode.ACCESS_POINT
             return
 
         # ✅ CB0401V2: skip mode endpoint (often dead/404 on provider firmware)
@@ -1384,7 +1393,11 @@ class LuciUpdater(DataUpdateCoordinator):
         # cooldown: si falló hace poco, no insistimos cada scan
         next_try = getattr(self, "_macfilter_next_try", now)
         # MAC filtering lives on the gateway, never on an access point node.
-        if not self.is_ap_mode and now >= next_try:
+        if self.is_ap_mode:
+            await self.hass.async_add_executor_job(
+                _LOGGER.debug, "[MiWiFi] AP mode: skipping macfilter_info for %s", self.ip
+            )
+        elif now >= next_try:
             call_timeout = self._macfilter_call_timeout()
             try:
                 # Usa timeout real del request (httpx) y evita doble timeout agresivo
