@@ -16,6 +16,8 @@ from custom_components.miwifi.services import (
     _has_domain_identifier,
 )
 
+RANDOMIZED_MAC: str = "FE:CA:54:D4:FC:A3"
+
 MOCK_MAC: str = "AA:BB:CC:DD:EE:FF"
 
 
@@ -152,5 +154,54 @@ async def test_purge_keeps_devices_shared_with_other_entries() -> None:
     )
 
     _result, dev_reg = await _async_purge([device])
+
+    assert dev_reg.removed == []
+
+
+def test_mac_is_read_from_every_unique_id_scheme() -> None:
+    """The tracker scheme "miwifi-<mac>" has only two segments."""
+
+    read = MiWifiPurgeInactiveDevicesServiceCall._mac_from_unique_id
+
+    assert read("miwifi-d8:fb:d6:76:a1:7d") == "D8:FB:D6:76:A1:7D"
+    assert read("d8:fb:d6:76:a1:7d") == "D8:FB:D6:76:A1:7D"
+    assert read("miwifi-dev-d8:fb:d6:76:a1:7d-signal") == "D8:FB:D6:76:A1:7D"
+    assert read("miwifi-01KEJ60BBTGP0G8XXTZ1CPH4T4-d8:fb:d6:76:a1:7d") == "D8:FB:D6:76:A1:7D"
+    assert read("miwifi-d8-fb-d6-76-a1-7d_2") == "D8:FB:D6:76:A1:7D"
+
+    assert read("miwifi-01KEJ60BBTGP0G8XXTZ1CPH4T4-devices_iot") is None
+    assert read("") is None
+    assert read(None) is None
+
+
+@pytest.mark.asyncio
+async def test_only_randomized_keeps_a_real_device() -> None:
+    """A factory MAC is never purged while only_randomized is on."""
+
+    device = _FakeDevice("dev-real", {(DOMAIN, "dc:a6:32:f1:72:dd")})
+
+    _result, dev_reg = await _async_purge([device], only_randomized=True)
+
+    assert dev_reg.removed == []
+
+
+@pytest.mark.asyncio
+async def test_only_randomized_still_purges_a_randomized_device() -> None:
+    """A locally administered MAC is what the option is meant to catch."""
+
+    device = _FakeDevice("dev-random", {(DOMAIN, RANDOMIZED_MAC)})
+
+    _result, dev_reg = await _async_purge([device], only_randomized=True)
+
+    assert dev_reg.removed == ["dev-random"]
+
+
+@pytest.mark.asyncio
+async def test_only_randomized_keeps_an_unreadable_mac() -> None:
+    """An unknown MAC is not evidence of a randomized one."""
+
+    device = _FakeDevice("dev-unknown", {(DOMAIN, "not-a-mac")})
+
+    _result, dev_reg = await _async_purge([device], only_randomized=True)
 
     assert dev_reg.removed == []

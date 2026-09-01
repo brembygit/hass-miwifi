@@ -1497,6 +1497,13 @@ class MiWifiPurgeInactiveDevicesServiceCall:
         if not uq:
             return None
 
+        # Device trackers are registered as "miwifi-<mac>" and device
+        # identifiers are the bare MAC, so look for a MAC anywhere in the
+        # string first: the segment parsing below only covers older schemes.
+        m = re.search(r"([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}", uq)
+        if m:
+            return MiWifiPurgeInactiveDevicesServiceCall._norm_mac(m.group(0))
+
         parts = uq.split("-")
         if len(parts) < 3:
             return None
@@ -1507,15 +1514,7 @@ class MiWifiPurgeInactiveDevicesServiceCall:
         if "_" in last:
             last = last.split("_", 1)[0]
 
-        mac = MiWifiPurgeInactiveDevicesServiceCall._norm_mac(last)
-        if mac:
-            return mac
-
-        m = re.search(r"([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})", uq)
-        if m:
-            return MiWifiPurgeInactiveDevicesServiceCall._norm_mac(m.group(0))
-
-        return None
+        return MiWifiPurgeInactiveDevicesServiceCall._norm_mac(last)
 
     async def async_call_service(self, service: ServiceCall):
         days: int = int(service.data.get("days", 30))
@@ -1562,8 +1561,9 @@ class MiWifiPurgeInactiveDevicesServiceCall:
             if not mac:
                 mac = self._mac_from_unique_id(entry.unique_id)
 
-            is_rand = self._is_randomized_mac(mac) if mac else False
-            if only_rand and not (is_rand or (mac is None and include_orphans_wo_age)):
+            # only_randomized must never delete a device we failed to identify:
+            # an unreadable MAC is not evidence that the MAC is randomized.
+            if only_rand and not self._is_randomized_mac(mac):
                 continue
 
             ts: int | None = None
@@ -1607,8 +1607,7 @@ class MiWifiPurgeInactiveDevicesServiceCall:
                         mac = self._mac_from_unique_id(ident)
                         break
 
-                is_rand = self._is_randomized_mac(mac) if mac else False
-                if only_rand and not (is_rand or (mac is None and include_orphans_wo_age)):
+                if only_rand and not self._is_randomized_mac(mac):
                     continue
 
                 ts = _last_ts_from_updaters(mac)
