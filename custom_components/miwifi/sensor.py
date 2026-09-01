@@ -97,12 +97,13 @@ from .const import (
     UPDATER,
     ATTR_TRACKER_ROUTER_MAC_ADDRESS,
     ATTR_TRACKER_UPDATER_ENTRY_ID,
+    ATTR_DEVICE_MAC_ADDRESS,
 )
 from .entity import MiWifiEntity
 from .enum import Connection, DeviceClass
 from .helper import detect_manufacturer, map_signal_quality
 from .logger import _LOGGER
-from .updater import LuciUpdater, async_get_updater
+from .updater import LuciUpdater, async_get_integrations, async_get_updater
 
 PARALLEL_UPDATES = 0
 
@@ -814,6 +815,120 @@ class MiWifiDeviceAttributeSensor(CoordinatorEntity, SensorEntity):
 
 
 
+def _unique_id_shape(unique_id: str, entry_id: str) -> str:
+    """Classify a sensor unique_id so the registry state is readable in the log."""
+
+    if unique_id.startswith(f"{DOMAIN}-dev-"):
+        return f"{DOMAIN}-dev-<mac>-<key>"
+
+    if unique_id.startswith(f"{DOMAIN}-{entry_id}-"):
+        return f"{DOMAIN}-<entry_id>-<key> (legacy)"
+
+    if unique_id.startswith(f"{entry_id}-"):
+        return "<entry_id>-<key> (router sensor)"
+
+    if unique_id.startswith(f"{entry_id}_"):
+        return "<entry_id>_<singleton>"
+
+    return "other"
+
+
+def _log_unique_id_shapes(registry: er.EntityRegistry, config_entry: ConfigEntry) -> None:
+    """Dump the distinct unique_id shapes this platform holds in the registry."""
+
+    own: dict[str, int] = {}
+    others: dict[str, int] = {}
+
+    for ent in registry.entities.values():
+        if ent.domain != "sensor" or ent.platform != DOMAIN:
+            continue
+
+        if ent.config_entry_id == config_entry.entry_id:
+            shape = _unique_id_shape(ent.unique_id or "", config_entry.entry_id)
+            own[shape] = own.get(shape, 0) + 1
+        else:
+            key = ent.config_entry_id or "unowned"
+            others[key] = others.get(key, 0) + 1
+
+    _LOGGER.debug(
+        "[MiWiFi] Registry sensor unique_id shapes for entry %s: %s (other entries: %s)",
+        config_entry.entry_id,
+        own,
+        others,
+    )
+
+
+def _cleanup_registry(
+    registry: er.EntityRegistry,
+    config_entry: ConfigEntry,
+    device_sensors_enabled: bool,
+) -> list[str]:
+    """Drop this entry's stale sensor registry entries.
+
+    Only entries owned by ``config_entry`` are touched: the same registry holds
+    the sensors of every other MiWiFi node, and another entry may legitimately
+    keep per-device sensors enabled.
+    """
+
+    removed: list[str] = []
+
+    for ent in list(registry.entities.values()):
+        if ent.domain != "sensor" or ent.platform != DOMAIN:
+            continue
+
+        if ent.config_entry_id != config_entry.entry_id:
+            continue
+
+        uid = ent.unique_id or ""
+
+        # Legacy scheme(s) tied to config entry id (avoid mesh duplicates)
+        if uid.startswith(f"{DOMAIN}-{config_entry.entry_id}-"):
+            registry.async_remove(ent.entity_id)
+            removed.append(ent.entity_id)
+            continue
+
+        # New scheme: "miwifi-dev-<MAC>-<key>"
+        if not device_sensors_enabled and uid.startswith(f"{DOMAIN}-dev-"):
+            registry.async_remove(ent.entity_id)
+            removed.append(ent.entity_id)
+
+    return removed
+
+
+def _warn_on_shared_router_mac(
+    hass: HomeAssistant, config_entry: ConfigEntry, updater: LuciUpdater
+) -> None:
+    """Warn when another loaded entry reports the same router MAC.
+
+    Entity ids are derived from that MAC, so two entries sharing it suggest the
+    very same entity_id and Home Assistant drops the sensors of whichever entry
+    registers second ("Platform miwifi does not generate unique IDs").
+    """
+
+    mac = str((updater.data or {}).get(ATTR_DEVICE_MAC_ADDRESS, "") or "").strip().upper()
+    if not mac:
+        return
+
+    for ip, integration in async_get_integrations(hass).items():
+        other = integration.get(UPDATER)
+        if not isinstance(other, LuciUpdater) or other.entry_id == config_entry.entry_id:
+            continue
+
+        other_mac = str((other.data or {}).get(ATTR_DEVICE_MAC_ADDRESS, "") or "").strip().upper()
+        if other_mac != mac:
+            continue
+
+        _LOGGER.warning(
+            "[MiWiFi] Router MAC %s is reported by both %s (entry %s) and %s (entry %s). "
+            "Entity ids are derived from it, so one of the two sensor sets will be dropped",
+            mac,
+            updater.ip,
+            config_entry.entry_id,
+            ip,
+            other.entry_id,
+        )
+
+
 def _build_device_sensors(
     updater: LuciUpdater, device: dict[str, Any]
 ) -> list[SensorEntity]:
@@ -861,20 +976,8 @@ async def async_setup_entry(
     registry = er.async_get(hass)
     device_sensors_enabled = _device_sensors_enabled()
 
-    for ent in list(registry.entities.values()):
-        if ent.domain != "sensor" or ent.platform != DOMAIN:
-            continue
-
-        uid = ent.unique_id or ""
-
-        # Legacy scheme(s) tied to config entry id (avoid mesh duplicates)
-        if uid.startswith(f"{DOMAIN}-{config_entry.entry_id}-"):
-            registry.async_remove(ent.entity_id)
-            continue
-
-        # New scheme: "miwifi-dev-<MAC>-<key>"
-        if not device_sensors_enabled and uid.startswith(f"{DOMAIN}-dev-"):
-            registry.async_remove(ent.entity_id)
+    _log_unique_id_shapes(registry, config_entry)
+    _cleanup_registry(registry, config_entry, device_sensors_enabled)
 
     @callback
     def _handle_new_device(new_device: dict) -> None:
@@ -1043,6 +1146,8 @@ async def _async_add_all_sensors_later(
             break
 
         await asyncio.sleep(2)
+
+    _warn_on_shared_router_mac(hass, config_entry, updater)
 
     is_cpe = _is_cb0401v2(updater)
     
