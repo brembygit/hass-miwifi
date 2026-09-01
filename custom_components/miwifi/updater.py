@@ -30,7 +30,6 @@ from homeassistant.helpers.httpx_client import get_async_client
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.helpers.translation import async_get_translations
-from homeassistant.helpers.typing import UNDEFINED
 from homeassistant.util import utcnow
 from httpx import codes
 
@@ -264,9 +263,11 @@ class LuciUpdater(DataUpdateCoordinator):
                 update_interval=self._update_interval,
                 update_method=self.update,
                 # async_config_entry_first_refresh() requires the coordinator to
-                # know its entry. Home Assistant can infer it from the setup
-                # context, but only there - pass it whenever we have it.
-                config_entry=config_entry if config_entry is not None else UNDEFINED,
+                # know its entry. Pass it straight through, None included: every
+                # use of it upstream is guarded, while leaving it UNDEFINED opts
+                # into the deprecated ContextVar lookup - which is what the config
+                # flow hit, since it builds an updater before an entry exists.
+                config_entry=config_entry,
             )
 
         self.data: dict[str, Any] = {}
@@ -291,6 +292,11 @@ class LuciUpdater(DataUpdateCoordinator):
 
         with contextlib.suppress(Exception):
             await self.luci.logout()
+
+        # Logging out is not enough: the coordinator keeps its refresh timer and
+        # debouncer. Home Assistant cancels them through config_entry.async_on_unload
+        # when there is an entry, but the config flow builds an updater without one.
+        await self.async_shutdown()
 
     @cached_property
     def _update_interval(self) -> timedelta:
