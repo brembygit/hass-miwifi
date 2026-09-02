@@ -201,6 +201,74 @@ def _find_leaf(graph: dict, ip: str) -> dict | None:
     return None
 
 
+def _ap_macs_by_ip(response: dict) -> dict[str, str]:
+    """Map a mesh node's LAN address to the MAC its clients are parented to.
+
+    A mesh node answers to two MACs. Its own firmware reports one through
+    `misystem/status` (`hardware.mac`), and that is what the config entry is
+    keyed on; the main sees another on the wire, and that is the one it writes
+    into every client's `parent`. Matching `parent` against the entry MAC alone
+    therefore never hits, and a leaf's clients stay attributed to the main.
+
+    The pairing is already in the same response: mesh nodes appear in the device
+    list flagged `isap`, carrying that second MAC alongside their LAN address.
+    On the mesh this was traced on, a client's `parent` held exactly the MAC
+    published by the `isap` entry for the leaf that was really serving it, while
+    that leaf's own entry was keyed on a different one. The topology graph
+    cannot stand in: its leaf entries carry no MAC at all.
+
+    :param response: dict: a misystem/devicelist response
+    :return dict[str, str]: LAN address -> uppercased backhaul MAC
+    """
+
+    macs: dict[str, str] = {}
+
+    for device in response.get("list", []):
+        if not isinstance(device, dict):
+            continue
+
+        try:
+            if int(device.get("isap") or 0) <= 0:
+                continue
+        except (TypeError, ValueError):
+            continue
+
+        if not (mac := str(device.get("mac") or "").strip().upper()):
+            continue
+
+        ip_list = device.get("ip")
+        if not isinstance(ip_list, list):
+            continue
+
+        # An active entry is the node's current address; a stale one is better
+        # than nothing, since a wired leaf can sit idle enough to age out.
+        fallback: str | None = None
+
+        for entry in ip_list:
+            if not isinstance(entry, dict):
+                continue
+
+            if not (address := str(entry.get("ip") or "").strip()):
+                continue
+
+            try:
+                is_active = int(entry.get("active") or 0) == 1
+            except (TypeError, ValueError):
+                is_active = False
+
+            if is_active:
+                fallback = address
+                break
+
+            if fallback is None:
+                fallback = address
+
+        if fallback is not None:
+            macs[fallback] = mac
+
+    return macs
+
+
 REPEATER_SKIP_ATTRS: Final = (
     ATTR_TRACKER_NAME,
     ATTR_TRACKER_IP,
@@ -294,6 +362,10 @@ class LuciUpdater(DataUpdateCoordinator):
         self._macfilter_warned_at = None
         self._macfilter_fail_count = 0
         self._filter_macs: dict[str, int] = {}
+
+        # Backhaul MACs already reported, so the alias is logged once per node
+        # rather than on every poll cycle.
+        self._logged_backhaul_macs: set[str] = set()
         
         # --- CB0401V2 / 5G CPE throttling ---
         self._is_cb0401v2: bool = False
@@ -1818,14 +1890,35 @@ class LuciUpdater(DataUpdateCoordinator):
 
         integrations = async_get_integrations(self.hass)
 
-        # Map router MAC -> integration IP (routers / leaf nodes)
+        # Map router MAC -> integration IP (routers / leaf nodes). A node is
+        # registered under every MAC it is known by, because which one lands in
+        # a client's `parent` is the firmware's choice, not ours.
+        ap_macs = _ap_macs_by_ip(response)
+
         mac_to_ip: dict[str, str] = {}
         for ip, integration in integrations.items():
             updater = integration.get(UPDATER)
-            if isinstance(updater, LuciUpdater):
-                mac = (updater.data or {}).get(ATTR_DEVICE_MAC_ADDRESS)
-                if isinstance(mac, str) and mac:
-                    mac_to_ip[mac.strip().upper()] = ip
+            if not isinstance(updater, LuciUpdater):
+                continue
+
+            mac = (updater.data or {}).get(ATTR_DEVICE_MAC_ADDRESS)
+            if isinstance(mac, str) and mac:
+                mac_to_ip[mac.strip().upper()] = ip
+
+            if (backhaul := ap_macs.get(ip)) is None or backhaul in mac_to_ip:
+                continue
+
+            mac_to_ip[backhaul] = ip
+
+            if backhaul not in self._logged_backhaul_macs:
+                self._logged_backhaul_macs.add(backhaul)
+                await self.hass.async_add_executor_job(
+                    _LOGGER.debug,
+                    "[MiWiFi] %s is also parented as %s (entry MAC: %s)",
+                    ip,
+                    backhaul,
+                    mac if isinstance(mac, str) else "unknown",
+                )
 
         # Collect devices that should be pushed to a leaf updater (key = integration IP)
         add_to: dict[str, list[dict]] = {}
