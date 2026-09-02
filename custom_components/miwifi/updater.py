@@ -252,6 +252,9 @@ class LuciUpdater(DataUpdateCoordinator):
         # Set once per cycle by reset_counter(); see _counters_pushed_by_parent.
         self._counters_reset_this_cycle: bool = False
 
+        # Last (mapped, skipped) wifi adapter names reported at debug.
+        self._wifi_adapters_logged: tuple | None = None
+
 
         if store is None and entry_id:
             self._store = Store(hass, 1, f"miwifi/{entry_id}.json")
@@ -1286,16 +1289,25 @@ class LuciUpdater(DataUpdateCoordinator):
         _adapters: list = await self._async_prepare_wifi_guest(response["info"])
 
         length: int = 0
+        _mapped: list[str] = []
+        _skipped: list[str] = []
 
         # Support only 5G , 2.4G, 5G Game and Guest
         for wifi in _adapters:
             if "ifname" not in wifi:
+                _skipped.append("<no ifname>")
                 continue
 
             try:
                 adapter: IfName = IfName(wifi["ifname"])
             except ValueError:
+                # Only wl0/wl1/wl2/wl14 are mapped. Anything else is dropped
+                # here, and with it the switch, the channel and the signal of a
+                # radio the node really has - silently, until now.
+                _skipped.append(str(wifi["ifname"]))
                 continue
+
+            _mapped.append(str(wifi["ifname"]))
 
             # Guest network is not an adapter
             if adapter != IfName.WL14:
@@ -1322,6 +1334,20 @@ class LuciUpdater(DataUpdateCoordinator):
                 data[f"{adapter.phrase}_data"] = wifi_data  # type: ignore
 
         data[ATTR_WIFI_ADAPTER_LENGTH] = length
+
+        # Report the picture once, and again whenever it changes: a radio that
+        # never shows up is the difference between a node with a 5G switch and a
+        # node without one.
+        _fingerprint: tuple = (tuple(_mapped), tuple(_skipped))
+        if _fingerprint != self._wifi_adapters_logged:
+            self._wifi_adapters_logged = _fingerprint
+            await self.hass.async_add_executor_job(
+                _LOGGER.debug,
+                "[MiWiFi] wifi adapters for %s: mapped %s, skipped %s",
+                self.ip,
+                _mapped or "none",
+                _skipped or "none",
+            )
 
     async def _async_prepare_wifi_guest(self, adapters: list) -> list:
         """Prepare wifi guest.
