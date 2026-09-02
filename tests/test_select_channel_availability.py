@@ -56,8 +56,10 @@ def _select(key: str, dual_band: bool = True, **data) -> MiWifiSelect:
     select._attr_options = list(select._base_options)
     select._attr_current_option = None
     select._wifi_data = {}
-    select._pending_option = None
-    select._pending_mismatches = 0
+    select._requested_option = None
+    select._requested_confirmed = False
+    select._requested_mismatches = 0
+    select._override_reported = None
 
     updater = MagicMock()
     updater.data = {

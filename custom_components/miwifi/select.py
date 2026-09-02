@@ -17,6 +17,7 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
+    ATTR_SELECT_REQUESTED_OPTION,
     ATTR_SELECT_SIGNAL_STRENGTH_OPTIONS,
     ATTR_SELECT_WIFI_2_4_CHANNEL,
     ATTR_SELECT_WIFI_2_4_CHANNEL_NAME,
@@ -197,10 +198,13 @@ class MiWifiSelect(MiWifiEntity, SelectEntity):
         if description.key in DATA_MAP:
             self._wifi_data = updater.data.get(DATA_MAP[description.key], {})
 
-        # What we last asked the router for, and how many refreshes have come
-        # back disagreeing with it. See _check_pending_option.
-        self._pending_option: str | None = None
-        self._pending_mismatches: int = 0
+        # What we last asked the router for - kept for the life of the entity,
+        # not for a window - whether the router has ever confirmed it, and what
+        # it was last seen replaced with. See _check_requested_option.
+        self._requested_option: str | None = None
+        self._requested_confirmed: bool = False
+        self._requested_mismatches: int = 0
+        self._override_reported: str | None = None
 
         self._attr_available: bool = (
             updater.data.get(ATTR_STATE, False)
@@ -285,6 +289,24 @@ class MiWifiSelect(MiWifiEntity, SelectEntity):
         option = self._attr_current_option
         return ICONS.get(f"{self.entity_description.key}_{option}")
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Publish the value you asked for while the router is ignoring it.
+
+        The warning goes to a log the people this happens to are not reading.
+        Comparing what you set against what the entity now shows was a matter
+        of holding two screenshots side by side; here it is next to the state.
+
+        :return dict[str, Any] | None: nothing to say unless the two disagree
+        """
+
+        if self._requested_option is None or str(self._attr_current_option) == str(
+            self._requested_option
+        ):
+            return None
+
+        return {ATTR_SELECT_REQUESTED_OPTION: self._requested_option}
+
     def _handle_coordinator_update(self) -> None:
         current_option: str = self._updater.data.get(self.entity_description.key, False)
 
@@ -303,7 +325,7 @@ class MiWifiSelect(MiWifiEntity, SelectEntity):
             and self._channel_is_reported()
         )
 
-        self._check_pending_option(current_option)
+        self._check_requested_option(current_option)
 
         data_changed: list = [
             key
@@ -367,48 +389,75 @@ class MiWifiSelect(MiWifiEntity, SelectEntity):
             # Raises if the router refused it, and then nothing below runs.
             await action(option)
 
-            self._pending_option = option
-            self._pending_mismatches = 0
+            self._requested_option = option
+            self._requested_confirmed = False
+            self._requested_mismatches = 0
+            self._override_reported = None
 
             self._updater.data[self.entity_description.key] = option
             self._attr_current_option = option
 
             self.async_write_ha_state()
 
-    def _check_pending_option(self, reported: Any) -> None:
-        """Say so when the router quietly puts the old value back.
+    def _check_requested_option(self, reported: Any) -> None:
+        """Say so when the router replaces the value you chose.
 
         A mesh controller owns the radio settings of the nodes it manages: it
-        answers `code: 0` to a channel change and restores its own value at the
-        next sync. Accepted-then-reverted and accepted-and-kept are identical in
-        the interface, and telling them apart meant reading the debug log.
+        answers `code: 0` and takes the value back later, and how much later is
+        not bounded. On a four node mesh the RA82 leaves undo a channel or a
+        power change on their own within minutes, while the RD28 leaf kept both
+        for hours and lost them in one go the moment the main's profile was
+        touched and pushed to every node. Accepted-then-replaced and
+        accepted-and-kept are identical in the interface.
 
-        Two disagreeing refreshes are required, because a poll already in flight
-        when the write landed reports the old value once through no fault of the
-        router.
+        3.6.12 watched for it with a counter that disarmed on the first refresh
+        that agreed, which is blind to everything but an immediate revert: a
+        controller that lets the change stand for a cycle and overwrites it
+        later was invisible. So the request is remembered for the life of the
+        entity instead, and any departure from it is reported - once per
+        departure, because for a value the router will never give back, once per
+        refresh would be a warning every thirty seconds for ever.
+
+        Before the first confirmation two disagreeing refreshes are required: a
+        poll already in flight when the write landed reports the old value once
+        through no fault of the router.
+
+        :param reported: Any: what this refresh says the value is
         """
 
-        if self._pending_option is None:
+        if self._requested_option is None:
             return
 
-        if str(reported) == str(self._pending_option):
-            self._pending_option = None
-            self._pending_mismatches = 0
+        # The key is simply absent while a node does not report the band, and
+        # `data.get` hands that over as the False it was given as a default.
+        if reported is None or isinstance(reported, bool):
             return
 
-        self._pending_mismatches += 1
-        if self._pending_mismatches < 2:
+        if str(reported) == str(self._requested_option):
+            self._requested_confirmed = True
+            self._requested_mismatches = 0
+
+            # Being overridden again later is a new event, and worth saying.
+            self._override_reported = None
             return
+
+        if not self._requested_confirmed:
+            self._requested_mismatches += 1
+            if self._requested_mismatches < 2:
+                return
+
+        if str(reported) == str(self._override_reported):
+            return
+
+        self._override_reported = str(reported)
 
         _LOGGER.warning(
-            "[MiWiFi] %s reverted %s to %s after accepting %s."
-            " On a mesh the controller owns the radio settings of its nodes:"
-            " change them where the controller can see it, not per node",
+            "[MiWiFi] %s replaced %s with %s after accepting %s."
+            " Something on the router owns this setting: on a mesh the main's"
+            " radio profile is pushed onto every node, so set it there rather"
+            " than per node",
             self._updater.ip,
             self.entity_description.key,
             reported,
-            self._pending_option,
+            self._requested_option,
         )
-
-        self._pending_option = None
-        self._pending_mismatches = 0
