@@ -172,22 +172,26 @@ class MiWifiSelect(MiWifiEntity, SelectEntity):
 
         self._attr_current_option = updater.data.get(description.key, None)
 
-        self._attr_options = []
+        self._base_options: list = []
         if description.key in CHANNELS_MAP:
-            self._attr_options = updater.data.get(CHANNELS_MAP[description.key], [])
+            self._base_options = list(
+                updater.data.get(CHANNELS_MAP[description.key], [])
+            )
 
-        if description.key in OPTIONS_MAP and len(self._attr_options) == 0:
+        if description.key in OPTIONS_MAP and len(self._base_options) == 0:
             if (
                 updater.data.get(ATTR_WIFI_ADAPTER_LENGTH, 2) > 2
                 and description.key == ATTR_SELECT_WIFI_5_0_CHANNEL
             ):
-                self._attr_options = [
+                self._base_options = [
                     option
                     for option in OPTIONS_MAP[description.key]
                     if option not in OPTIONS_MAP[ATTR_SELECT_WIFI_5_0_GAME_CHANNEL]
                 ]
             else:
-                self._attr_options = OPTIONS_MAP[description.key]
+                self._base_options = list(OPTIONS_MAP[description.key])
+
+        self._attr_options = self._options_with_current(self._attr_current_option)
 
         self._wifi_data: dict = {}
         if description.key in DATA_MAP:
@@ -203,6 +207,45 @@ class MiWifiSelect(MiWifiEntity, SelectEntity):
             and len(self._attr_options) > 0
             and self._channel_is_reported()
         )
+
+    def _options_with_current(self, current: Any) -> list:
+        """Keep the channel the router reports selectable.
+
+        The option list comes from `avaliable_channels`, which the updater asks
+        once, on the first update, and whose answer can be narrower than what
+        the radio is actually on: the RA82 leaves offer 36-48 and are then
+        parked on the main's channel by the mesh controller. Home Assistant
+        renders a select whose current option is not among its options as
+        `unknown`, so the picker went blank exactly when the channel was worth
+        seeing - and stayed blank, because the list is never asked for again.
+
+        Widening it here needs no extra request and no guess about why the two
+        disagree. Channels only: signal strength is min/mid/max everywhere, and
+        a fourth value there would be a bug rather than a discovery.
+
+        :param current: Any: the value the router reports
+        :return list: the options, with `current` in numeric place if it is new
+        """
+
+        if self.entity_description.key not in CHANNELS_MAP:
+            return list(self._base_options)
+
+        # Absent keys arrive as the False that `data.get` was given as default.
+        if current is None or isinstance(current, bool):
+            return list(self._base_options)
+
+        option: str = str(current).strip()
+
+        # "0" is how a firmware says "unset"; it is not a channel to offer.
+        if option in ("", "0") or option in self._base_options:
+            return list(self._base_options)
+
+        options: list = self._base_options + [option]
+
+        try:
+            return sorted(options, key=int)
+        except (TypeError, ValueError):  # pragma: no cover
+            return options
 
     def _channel_is_reported(self) -> bool:
         """Does the router tell us which channel this band is on?
@@ -251,9 +294,11 @@ class MiWifiSelect(MiWifiEntity, SelectEntity):
                 DATA_MAP[self.entity_description.key], {}
             )
 
+        options: list = self._options_with_current(current_option)
+
         is_available: bool = (
             self._updater.data.get(ATTR_STATE, False)
-            and len(self._attr_options) > 0
+            and len(options) > 0
             and len(wifi_data) > 0
             and self._channel_is_reported()
         )
@@ -268,12 +313,14 @@ class MiWifiSelect(MiWifiEntity, SelectEntity):
 
         if (
             self._attr_current_option == current_option
+            and self._attr_options == options
             and self._attr_available == is_available
             and not data_changed
         ):
             return
 
         self._attr_available = is_available
+        self._attr_options = options
         self._attr_current_option = current_option
         self._wifi_data = wifi_data
 

@@ -52,7 +52,8 @@ def _select(key: str, dual_band: bool = True, **data) -> MiWifiSelect:
     select._attr_entity_registry_enabled_default = (
         select.entity_description.entity_registry_enabled_default
     )
-    select._attr_options = ["1", "6", "11", "36", "100", "mid"]
+    select._base_options = ["1", "6", "11", "36", "100", "mid"]
+    select._attr_options = list(select._base_options)
     select._attr_current_option = None
     select._wifi_data = {}
     select._pending_option = None
