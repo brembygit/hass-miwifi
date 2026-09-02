@@ -249,6 +249,9 @@ class LuciUpdater(DataUpdateCoordinator):
         self._sms_next_try = dt_util.utcnow()
         self._cpe_newstatus_next_try = dt_util.utcnow()
 
+        # Set once per cycle by reset_counter(); see _counters_pushed_by_parent.
+        self._counters_reset_this_cycle: bool = False
+
 
         if store is None and entry_id:
             self._store = Store(hass, 1, f"miwifi/{entry_id}.json")
@@ -315,6 +318,7 @@ class LuciUpdater(DataUpdateCoordinator):
         """
 
         self.code = codes.OK
+        self._counters_reset_this_cycle = False
 
         _is_before_reauthorization: bool = self._is_reauthorization
         _err: LuciError | None = None
@@ -424,6 +428,20 @@ class LuciUpdater(DataUpdateCoordinator):
             await self.hass.async_add_executor_job(_LOGGER.debug, "[MiWiFi] Finalizó login (is_only_login), código=%s, data[ATTR_STATE]=%s", self.code, self.data.get(ATTR_STATE))
 
         return self.data
+
+    @property
+    def _counters_pushed_by_parent(self) -> bool:
+        """Are this node's client counters owned by the node above it?
+
+        A repeater or access point without force load does not recount its own
+        clients at the start of every cycle: the main pushes them in through
+        add_device(is_from_parent=True), having forced a reset first. Resetting
+        here as well would blank the pushed values on the next poll.
+
+        :return bool: counters are maintained by the parent
+        """
+
+        return self.is_repeater and not self.is_force_load
 
     @property
     def is_repeater(self) -> bool:
@@ -1808,6 +1826,19 @@ class LuciUpdater(DataUpdateCoordinator):
             if not (is_from_parent and self._has_dedicated_iot_wifi()):
                 return
 
+        # A node whose counters are pushed by the parent skips the reset at the
+        # top of the cycle - but it still enumerates its own clients through
+        # misystem/devicelist, and every one of them lands here. Without a reset
+        # the counters would only ever grow. Reset on the first client we count
+        # for ourselves, so a cycle that finds none leaves the parent's numbers
+        # alone instead of blanking them.
+        if (
+            not is_from_parent
+            and self._counters_pushed_by_parent
+            and not self._counters_reset_this_cycle
+        ):
+            self.reset_counter(is_force=True)
+
         if "new_status" not in self.data:
             self.data.setdefault(ATTR_SENSOR_DEVICES, 0)
             self.data.setdefault(ATTR_SENSOR_DEVICES_LAN, 0)
@@ -2109,8 +2140,10 @@ class LuciUpdater(DataUpdateCoordinator):
         :param is_remove: bool: Force remove
         """
 
-        if self.is_repeater and not self.is_force_load and not is_force:
+        if self._counters_pushed_by_parent and not is_force:
             return
+
+        self._counters_reset_this_cycle = True
 
         for attr in [
             ATTR_SENSOR_DEVICES,
@@ -2142,9 +2175,13 @@ class LuciUpdater(DataUpdateCoordinator):
     async def _async_save_devices(self) -> None:
         """Async save devices to Store"""
 
+        # Mirror _async_prepare_device_restore: it restores unless the devices
+        # belong to the parent (repeater + force load), so those are exactly the
+        # ones not worth saving. The condition used to be the complement of that,
+        # which left a node restoring from a store nothing ever wrote.
         if (
             self._store is None
-            or (self.is_repeater and not self.is_force_load)
+            or (self.is_repeater and self.is_force_load)
             or len(self.devices) == 0
         ):
             return
