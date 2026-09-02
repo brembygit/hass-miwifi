@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from .logger import _LOGGER
-from typing import Final
+from typing import Any, Final
 
 from homeassistant.components.select import (
     ENTITY_ID_FORMAT,
@@ -12,6 +12,7 @@ from homeassistant.components.select import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -192,6 +193,11 @@ class MiWifiSelect(MiWifiEntity, SelectEntity):
         if description.key in DATA_MAP:
             self._wifi_data = updater.data.get(DATA_MAP[description.key], {})
 
+        # What we last asked the router for, and how many refreshes have come
+        # back disagreeing with it. See _check_pending_option.
+        self._pending_option: str | None = None
+        self._pending_mismatches: int = 0
+
         self._attr_available: bool = (
             updater.data.get(ATTR_STATE, False)
             and len(self._attr_options) > 0
@@ -252,6 +258,8 @@ class MiWifiSelect(MiWifiEntity, SelectEntity):
             and self._channel_is_reported()
         )
 
+        self._check_pending_option(current_option)
+
         data_changed: list = [
             key
             for key, value in wifi_data.items()
@@ -294,15 +302,66 @@ class MiWifiSelect(MiWifiEntity, SelectEntity):
 
         try:
             await self._updater.luci.set_wifi(new_data)
-            self._wifi_data = new_data
         except LuciError as _e:
+            # This used to be swallowed at debug level while the entity went on
+            # to show the new value anyway, so a router that refused the change
+            # looked exactly like one that accepted it.
             _LOGGER.debug("WiFi update error: %r", _e)
+
+            raise HomeAssistantError(
+                f"{self._updater.ip} refused the change to"
+                f" {self.entity_description.key}: {_e}"
+            ) from _e
+
+        self._wifi_data = new_data
 
     async def async_select_option(self, option: str) -> None:
         if action := getattr(self, f"_{self.entity_description.key}_change"):
+            # Raises if the router refused it, and then nothing below runs.
             await action(option)
+
+            self._pending_option = option
+            self._pending_mismatches = 0
 
             self._updater.data[self.entity_description.key] = option
             self._attr_current_option = option
 
             self.async_write_ha_state()
+
+    def _check_pending_option(self, reported: Any) -> None:
+        """Say so when the router quietly puts the old value back.
+
+        A mesh controller owns the radio settings of the nodes it manages: it
+        answers `code: 0` to a channel change and restores its own value at the
+        next sync. Accepted-then-reverted and accepted-and-kept are identical in
+        the interface, and telling them apart meant reading the debug log.
+
+        Two disagreeing refreshes are required, because a poll already in flight
+        when the write landed reports the old value once through no fault of the
+        router.
+        """
+
+        if self._pending_option is None:
+            return
+
+        if str(reported) == str(self._pending_option):
+            self._pending_option = None
+            self._pending_mismatches = 0
+            return
+
+        self._pending_mismatches += 1
+        if self._pending_mismatches < 2:
+            return
+
+        _LOGGER.warning(
+            "[MiWiFi] %s reverted %s to %s after accepting %s."
+            " On a mesh the controller owns the radio settings of its nodes:"
+            " change them where the controller can see it, not per node",
+            self._updater.ip,
+            self.entity_description.key,
+            reported,
+            self._pending_option,
+        )
+
+        self._pending_option = None
+        self._pending_mismatches = 0
