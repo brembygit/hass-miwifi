@@ -234,13 +234,22 @@ class MiWifiSwitch(MiWifiEntity, SwitchEntity):
     def _additional_prepare(self) -> bool:
         is_available: bool = self._updater.data.get(ATTR_STATE, False)
 
+        # Band steering (the router's "Smart connect") merges 2.4 and 5 GHz into
+        # one network, and the 5 GHz half stops being separately controllable.
+        # Availability follows that, and follows it back when it is turned off.
+        #
+        # What must NOT happen here is touching entity_registry_enabled_default.
+        # This runs from __init__, the registry keeps whatever it was told the
+        # first time an entity was registered, and the value it would be told
+        # depends on whether the coordinator had already fetched `bsd` - so two
+        # identical nodes end up with different entities depending on the order
+        # in which they were added and on when the option was switched on.
         if self._updater.data.get(
             ATTR_BINARY_SENSOR_DUAL_BAND, False
         ) and self.entity_description.key in [
             ATTR_SWITCH_WIFI_5_0,
             ATTR_SWITCH_WIFI_5_0_GAME,
         ]:
-            self._attr_entity_registry_enabled_default = False
             is_available = False
 
         return is_available and self.entity_description.key in self._updater.data
