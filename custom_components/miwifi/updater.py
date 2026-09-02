@@ -1366,7 +1366,20 @@ class LuciUpdater(DataUpdateCoordinator):
             return
 
         for index in range(1, data.get(ATTR_WIFI_ADAPTER_LENGTH, 2) + 1):
-            response: dict = await self.luci.avaliable_channels(index)
+            try:
+                response: dict = await self.luci.avaliable_channels(index)
+            except LuciError as _e:
+                # LuciError derives from BaseException: unhandled, it escapes the
+                # prepare loop and takes every later step of the cycle with it -
+                # here devices, device_list, device_restore, ap and new_status.
+                await self.hass.async_add_executor_job(
+                    _LOGGER.debug,
+                    "[MiWiFi] channels unavailable for %s (adapter %s): %s",
+                    self.ip,
+                    index,
+                    _e,
+                )
+                continue
 
             if "list" not in response or len(response["list"]) == 0:
                 continue
@@ -1510,7 +1523,19 @@ class LuciUpdater(DataUpdateCoordinator):
     async def _async_prepare_device_list(self, data: dict) -> None:
         """Prepare MiWiFi device list (api/misystem/devicelist)."""
 
-        response: dict = await self.luci.device_list()
+        try:
+            response: dict = await self.luci.device_list()
+        except LuciError as _e:
+            # Losing the client list must not also cost us device_restore, ap and
+            # new_status: a node that is really gone already failed at status.
+            await self.hass.async_add_executor_job(
+                _LOGGER.debug,
+                "[MiWiFi] device_list unavailable for %s: %s",
+                self.ip,
+                _e,
+            )
+            return
+
         await asyncio.sleep(DEFAULT_CALL_DELAY)
 
         integrations = async_get_integrations(self.hass)
@@ -1974,7 +1999,16 @@ class LuciUpdater(DataUpdateCoordinator):
         if self.data.get(ATTR_SENSOR_MODE, Mode.DEFAULT) != Mode.REPEATER:
             return
 
-        response: dict = await self.luci.wifi_ap_signal()
+        try:
+            response: dict = await self.luci.wifi_ap_signal()
+        except LuciError as _e:
+            await self.hass.async_add_executor_job(
+                _LOGGER.debug,
+                "[MiWiFi] wifi_ap_signal unavailable for %s: %s",
+                self.ip,
+                _e,
+            )
+            return
 
         if "signal" in response and isinstance(response["signal"], int):
             data[ATTR_SENSOR_AP_SIGNAL] = response["signal"]
@@ -1989,8 +2023,16 @@ class LuciUpdater(DataUpdateCoordinator):
             #await self.hass.async_add_executor_job(_LOGGER.warning, "⚠️ [new_status] is_force_load is False. Skipping new_status.")
             return
 
-        response: dict = await self.luci.new_status()
-        #await self.hass.async_add_executor_job(_LOGGER.warning, "📶 [new_status] Raw response: %s", response)
+        try:
+            response: dict = await self.luci.new_status()
+        except LuciError as _e:
+            await self.hass.async_add_executor_job(
+                _LOGGER.debug,
+                "[MiWiFi] new_status unavailable for %s: %s",
+                self.ip,
+                _e,
+            )
+            return
 
         if "count" in response:
             data[ATTR_SENSOR_DEVICES] = response["count"]
