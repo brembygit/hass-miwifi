@@ -110,6 +110,7 @@ from .const import (
     UPDATER,
 )
 from .enum import (
+    MESH_ROLE_MODES,
     Connection,
     DeviceAction,
     EncryptionAlgorithm,
@@ -146,6 +147,34 @@ NEW_STATUS_MAP: Final = {
     "game": ATTR_SENSOR_DEVICES_5_0_GAME,
     "iot": ATTR_SENSOR_DEVICES_IOT,
 }
+
+def _find_leaf(graph: dict, ip: str) -> dict | None:
+    """Find a node's own entry in someone else's topology graph.
+
+    Leaves nest, and a graph carries malformed entries (no ip, empty ip), so
+    this walks depth first and skips anything that is not a usable dict.
+
+    :param graph: dict: a topo_graph "graph" object, or a leaf of one
+    :param ip: str: the address to look for
+    :return dict | None: the leaf entry, or None when the graph does not list it
+    """
+
+    leafs = graph.get("leafs")
+    if not isinstance(leafs, list):
+        return None
+
+    for leaf in leafs:
+        if not isinstance(leaf, dict):
+            continue
+
+        if str(leaf.get("ip") or "").strip() == ip:
+            return leaf
+
+        if (found := _find_leaf(leaf, ip)) is not None:
+            return found
+
+    return None
+
 
 REPEATER_SKIP_ATTRS: Final = (
     ATTR_TRACKER_NAME,
@@ -254,6 +283,9 @@ class LuciUpdater(DataUpdateCoordinator):
 
         # Last (mapped, skipped) wifi adapter names reported at debug.
         self._wifi_adapters_logged: tuple | None = None
+
+        # The topology-derived role is reported once, not once per cycle.
+        self._topology_role_logged: bool = False
 
 
         if store is None and entry_id:
@@ -431,6 +463,85 @@ class LuciUpdater(DataUpdateCoordinator):
             await self.hass.async_add_executor_job(_LOGGER.debug, "[MiWiFi] Finalizó login (is_only_login), código=%s, data[ATTR_STATE]=%s", self.code, self.data.get(ATTR_STATE))
 
         return self.data
+
+    def _leaf_entry_from_other_nodes(self) -> dict | None:
+        """Our own entry in the topology graph of another configured node.
+
+        The main is the only node that sees the whole mesh, and it publishes one
+        entry per leaf carrying that leaf's mode, link type and client count.
+
+        :return dict | None: our leaf entry, or None when nobody lists us
+        """
+
+        for ip, integration in async_get_integrations(self.hass).items():
+            if ip == self.ip:
+                continue
+
+            updater = integration.get(UPDATER)
+            if not isinstance(updater, LuciUpdater):
+                continue
+
+            graph: dict = ((updater.data or {}).get("topo_graph") or {}).get("graph") or {}
+
+            if (leaf := _find_leaf(graph, self.ip)) is not None:
+                return leaf
+
+        return None
+
+    def _topology_role(self) -> Mode | None:
+        """The role the topology graph gives this node, if it gives one.
+
+        `xqnetwork/mode` answers `default` on a wired-backhaul leaf, which types
+        it as a standalone gateway and sends the coordinator asking it for WAN
+        and MAC filter data it cannot serve. The graph knows better, from two
+        independent directions: what the node says about itself, and what the
+        node above it says about the node.
+
+        Only a positive identification counts. Nothing here can push a node
+        towards `default`, so a graph that has not arrived yet - our own is
+        written at the end of the cycle, so on the first one it is absent -
+        simply leaves the endpoint in charge.
+
+        :return Mode | None: the mesh role, or None when the graph cannot tell
+        """
+
+        graph: dict = ((self.data.get("topo_graph") or {}).get("graph") or {})
+
+        # The main is never a leaf, whoever else lists it.
+        if graph.get("is_main"):
+            return None
+
+        with contextlib.suppress(KeyError, TypeError, ValueError):
+            if (own_role := Mode(int(graph["mode"]))) in MESH_ROLE_MODES:
+                return own_role
+
+        if (leaf := self._leaf_entry_from_other_nodes()) is not None:
+            # A leaf reports its own mode as 1 in the main's graph, which is
+            # this integration's REPEATER - a different thing, with an upstream
+            # link and an ap signal. Listed as a leaf means mesh node.
+            with contextlib.suppress(KeyError, TypeError, ValueError):
+                if (listed_role := Mode(int(leaf["mode"]))) in MESH_ROLE_MODES:
+                    return listed_role
+
+            return Mode.MESH_NODE
+
+        return None
+
+    @property
+    def is_access_point(self) -> bool:
+        """Does this node sit inside someone else's network?
+
+        The manual option is an override for a leaf the topology cannot place;
+        normally the role comes from the mode, which _async_prepare_mode derives
+        from the topology when the endpoint cannot tell.
+
+        :return bool: node is an access point or a mesh leaf
+        """
+
+        if self.is_ap_mode:
+            return True
+
+        return self.data.get(ATTR_SENSOR_MODE, Mode.DEFAULT) in MESH_ROLE_MODES
 
     @property
     def _counters_pushed_by_parent(self) -> bool:
@@ -896,6 +1007,23 @@ class LuciUpdater(DataUpdateCoordinator):
             data[ATTR_SENSOR_MODE] = Mode.DEFAULT
             return
 
+        # The topology graph is the authoritative view of the mesh, and a leaf
+        # behind a foreign gateway answers `default` here. Take the role from the
+        # graph when it has one, and skip a gateway probe the node cannot answer.
+        if (topology_role := self._topology_role()) is not None:
+            data[ATTR_SENSOR_MODE] = topology_role
+
+            if not self._topology_role_logged:
+                self._topology_role_logged = True
+                await self.hass.async_add_executor_job(
+                    _LOGGER.debug,
+                    "[MiWiFi] %s is %s per the topology graph: skipping the gateway mode probe",
+                    self.ip,
+                    topology_role.phrase,
+                )
+
+            return
+
         try:
             response: dict = await asyncio.wait_for(self.luci.mode(), timeout=6)
         except (asyncio.TimeoutError, LuciError, LuciConnectionError):
@@ -1097,7 +1225,7 @@ class LuciUpdater(DataUpdateCoordinator):
                     return v
             return None
 
-        if self.is_ap_mode:
+        if self.is_access_point:
             await self.hass.async_add_executor_job(
                 _LOGGER.debug, "[MiWiFi] AP mode: skipping 'wan' for %s", self.ip
             )
@@ -1447,7 +1575,7 @@ class LuciUpdater(DataUpdateCoordinator):
         # cooldown: si falló hace poco, no insistimos cada scan
         next_try = getattr(self, "_macfilter_next_try", now)
         # MAC filtering lives on the gateway, never on an access point node.
-        if self.is_ap_mode:
+        if self.is_access_point:
             await self.hass.async_add_executor_job(
                 _LOGGER.debug, "[MiWiFi] AP mode: skipping macfilter_info for %s", self.ip
             )
