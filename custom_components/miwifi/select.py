@@ -16,7 +16,6 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
-    ATTR_BINARY_SENSOR_DUAL_BAND,
     ATTR_SELECT_SIGNAL_STRENGTH_OPTIONS,
     ATTR_SELECT_WIFI_2_4_CHANNEL,
     ATTR_SELECT_WIFI_2_4_CHANNEL_NAME,
@@ -63,17 +62,6 @@ DATA_MAP: Final = {
     ATTR_SELECT_WIFI_5_0_SIGNAL_STRENGTH: ATTR_WIFI_5_0_DATA,
     ATTR_SELECT_WIFI_5_0_GAME_SIGNAL_STRENGTH: ATTR_WIFI_5_0_GAME_DATA,
 }
-
-#: Controls for the 5 GHz half of a network the router has merged into one.
-#: Mirrors the rule switch.py applies to the 5 GHz switches.
-BAND_STEERING_MERGED: Final = frozenset(
-    {
-        ATTR_SELECT_WIFI_5_0_CHANNEL,
-        ATTR_SELECT_WIFI_5_0_SIGNAL_STRENGTH,
-        ATTR_SELECT_WIFI_5_0_GAME_CHANNEL,
-        ATTR_SELECT_WIFI_5_0_GAME_SIGNAL_STRENGTH,
-    }
-)
 
 OPTIONS_MAP: Final = {
     ATTR_SELECT_WIFI_2_4_CHANNEL: ATTR_SELECT_WIFI_2_4_CHANNEL_OPTIONS,
@@ -207,29 +195,41 @@ class MiWifiSelect(MiWifiEntity, SelectEntity):
         self._attr_available: bool = (
             updater.data.get(ATTR_STATE, False)
             and len(self._attr_options) > 0
-            and not self._merged_by_band_steering()
+            and self._channel_is_reported()
         )
 
-    def _merged_by_band_steering(self) -> bool:
-        """Is this a control for a band the router no longer keeps separate?
+    def _channel_is_reported(self) -> bool:
+        """Does the router tell us which channel this band is on?
 
-        Band steering (the router's "Smart connect") presents 2.4 and 5 GHz as
-        one network. switch.py already takes the 5 GHz switches out of service
-        for it; the channel and signal controls for the same band were left
-        behind, so a node could offer a channel to set on a band whose on/off
-        it declared unavailable - and on the firmwares that report no channel
-        at all, offer it reading `unknown`.
+        Band steering was the first suspect - it is what takes the 5 GHz
+        switches out of service in switch.py - but it is the wrong test here.
+        Under the same merged network the RD28 pair answers with a real 5 GHz
+        channel while the RA82 pair answers with nothing, so keying on the
+        merge hid a working control on half the fleet, and with it the only
+        per-node view of the channel: the panel's own wifi endpoint is
+        main-only (`ws_api._pick_updater`), so it shows one router's numbers on
+        every node's card.
+
+        What is actually broken is a channel picker for a band whose channel
+        the router will not state. That is the condition, and it needs no
+        knowledge of why the router is quiet.
+
+        Signal strength is not covered: it is reported everywhere, on both
+        bands, merged or not.
 
         Availability only. Registration must not depend on this: the value
         changes, a registry default does not.
 
-        :return bool: the band is merged and this control belongs to it
+        :return bool: not a channel control, or one the router reports
         """
 
-        if self.entity_description.key not in BAND_STEERING_MERGED:
-            return False
+        if self.entity_description.key not in CHANNELS_MAP:
+            return True
 
-        return bool(self._updater.data.get(ATTR_BINARY_SENSOR_DUAL_BAND, False))
+        channel = self._updater.data.get(self.entity_description.key)
+
+        # "0" is how a firmware says "unset" where it says anything at all.
+        return str(channel or "").strip() not in ("", "0")
 
     @property
     def icon(self) -> str | None:
@@ -249,7 +249,7 @@ class MiWifiSelect(MiWifiEntity, SelectEntity):
             self._updater.data.get(ATTR_STATE, False)
             and len(self._attr_options) > 0
             and len(wifi_data) > 0
-            and not self._merged_by_band_steering()
+            and self._channel_is_reported()
         )
 
         data_changed: list = [
