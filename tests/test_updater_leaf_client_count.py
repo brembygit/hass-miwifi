@@ -4,6 +4,11 @@ A wired-backhaul leaf answers misystem/devicelist with an empty list, so its
 `devices` sensor sat at whatever the main last pushed - or at zero while the
 main's graph reported eight clients on it. The graph's `leafs[].onlines` is the
 reliable per-node number and is fetched every cycle anyway.
+
+A count the main pushes in is a weaker claim than one the node made for
+itself: the main can only name the clients its own device list carries,
+which on a mesh bridged onto the ISP's LAN is a fraction of what the node
+serves. It is a floor, and the graph outranks it while it knows about more.
 """
 
 # pylint: disable=no-member,protected-access
@@ -31,6 +36,7 @@ def _updater(ip: str = LEAF_IP, mode: Mode = Mode.MESH_NODE) -> LuciUpdater:
     updater.is_force_load = False
     updater.data = {ATTR_SENSOR_MODE: mode}
     updater._counters_reset_this_cycle = False
+    updater._counters_pushed_this_cycle = False
 
     hass = MagicMock()
 
@@ -93,7 +99,7 @@ async def test_zero_steered_clients_is_a_real_answer() -> None:
 
 @pytest.mark.asyncio
 async def test_counting_our_own_clients_wins() -> None:
-    """The reset flag marks a cycle in which real numbers were produced."""
+    """The reset flag marks a cycle in which we produced real numbers."""
 
     leaf = _updater()
     leaf.data[ATTR_SENSOR_DEVICES] = 3
@@ -103,6 +109,51 @@ async def test_counting_our_own_clients_wins() -> None:
         await leaf._async_apply_leaf_client_count()
 
     assert leaf.data[ATTR_SENSOR_DEVICES] == 3
+
+
+@pytest.mark.asyncio
+async def test_a_count_the_main_pushed_in_is_only_a_floor() -> None:
+    """One client of seven is what the main could name, not what the node serves."""
+
+    leaf = _updater()
+    leaf.data[ATTR_SENSOR_DEVICES] = 1
+    leaf._counters_reset_this_cycle = True
+    leaf._counters_pushed_this_cycle = True
+
+    with _patch_integrations(leaf, _main(onlines=7)):
+        await leaf._async_apply_leaf_client_count()
+
+    assert leaf.data[ATTR_SENSOR_DEVICES] == 7
+
+
+@pytest.mark.asyncio
+async def test_a_pushed_count_the_graph_cannot_beat_stands() -> None:
+    """The graph must never talk a real enumeration downwards."""
+
+    leaf = _updater()
+    leaf.data[ATTR_SENSOR_DEVICES] = 9
+    leaf._counters_reset_this_cycle = True
+    leaf._counters_pushed_this_cycle = True
+
+    with _patch_integrations(leaf, _main(onlines=7)):
+        await leaf._async_apply_leaf_client_count()
+
+    assert leaf.data[ATTR_SENSOR_DEVICES] == 9
+
+
+@pytest.mark.asyncio
+async def test_the_two_agreeing_is_not_a_change() -> None:
+    """The ordinary case, where the main did carry the whole list."""
+
+    leaf = _updater()
+    leaf.data[ATTR_SENSOR_DEVICES] = 7
+    leaf._counters_reset_this_cycle = True
+    leaf._counters_pushed_this_cycle = True
+
+    with _patch_integrations(leaf, _main(onlines=7)):
+        await leaf._async_apply_leaf_client_count()
+
+    assert leaf.data[ATTR_SENSOR_DEVICES] == 7
 
 
 @pytest.mark.asyncio
