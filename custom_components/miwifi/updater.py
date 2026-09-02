@@ -439,6 +439,8 @@ class LuciUpdater(DataUpdateCoordinator):
             
         await self._async_prepare_topo()
 
+        await self._async_apply_leaf_client_count()
+
         await self._async_prepare_compatibility()
         
         if isinstance(getattr(self, "capabilities", None), dict) and self.capabilities.get("portforward", False):
@@ -2312,6 +2314,51 @@ class LuciUpdater(DataUpdateCoordinator):
                 del self.data[attr]
             elif not is_remove:
                 self.data[attr] = 0
+
+    async def _async_apply_leaf_client_count(self) -> None:
+        """Take the client count from the main when the leaf cannot serve one.
+
+        A wired-backhaul leaf answers misystem/devicelist with an empty list: it
+        counts nothing for itself, so its `devices` sensor keeps whatever the
+        main last pushed - or zero, while the main's graph says otherwise. That
+        graph carries `onlines` per leaf and is fetched every cycle anyway, so it
+        is the reliable per-node number.
+
+        Counting our own clients wins. `_counters_reset_this_cycle` is set
+        exactly when this node reset in order to recount - by itself through
+        add_device, or by the main pushing devices in - so it is also the test
+        for "somebody produced real numbers this cycle".
+
+        Zero is a real answer: a leaf that no client is steered to reports 0
+        cleanly rather than going unknown.
+        """
+
+        if self._counters_reset_this_cycle or not self.is_access_point:
+            return
+
+        leaf: dict | None = self._leaf_entry_from_other_nodes()
+        if leaf is None:
+            return
+
+        onlines: int | None = None
+        with contextlib.suppress(KeyError, TypeError, ValueError):
+            if (parsed := int(leaf["onlines"])) >= 0:
+                onlines = parsed
+
+        if onlines is None or self.data.get(ATTR_SENSOR_DEVICES) == onlines:
+            return
+
+        await self.hass.async_add_executor_job(
+            _LOGGER.debug,
+            "[MiWiFi] %s serves no client list of its own: taking %s from the main's topology graph",
+            self.ip,
+            onlines,
+        )
+
+        # Only the total. The graph does not split clients per band, and writing
+        # a guess into the per-band counters would be worse than leaving them at
+        # what the node itself last reported.
+        self.data[ATTR_SENSOR_DEVICES] = onlines
 
     async def _async_load_devices(self) -> dict | None:
         """Async load devices from Store"""
