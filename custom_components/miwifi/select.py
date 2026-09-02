@@ -16,6 +16,7 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
+    ATTR_BINARY_SENSOR_DUAL_BAND,
     ATTR_SELECT_SIGNAL_STRENGTH_OPTIONS,
     ATTR_SELECT_WIFI_2_4_CHANNEL,
     ATTR_SELECT_WIFI_2_4_CHANNEL_NAME,
@@ -62,6 +63,17 @@ DATA_MAP: Final = {
     ATTR_SELECT_WIFI_5_0_SIGNAL_STRENGTH: ATTR_WIFI_5_0_DATA,
     ATTR_SELECT_WIFI_5_0_GAME_SIGNAL_STRENGTH: ATTR_WIFI_5_0_GAME_DATA,
 }
+
+#: Controls for the 5 GHz half of a network the router has merged into one.
+#: Mirrors the rule switch.py applies to the 5 GHz switches.
+BAND_STEERING_MERGED: Final = frozenset(
+    {
+        ATTR_SELECT_WIFI_5_0_CHANNEL,
+        ATTR_SELECT_WIFI_5_0_SIGNAL_STRENGTH,
+        ATTR_SELECT_WIFI_5_0_GAME_CHANNEL,
+        ATTR_SELECT_WIFI_5_0_GAME_SIGNAL_STRENGTH,
+    }
+)
 
 OPTIONS_MAP: Final = {
     ATTR_SELECT_WIFI_2_4_CHANNEL: ATTR_SELECT_WIFI_2_4_CHANNEL_OPTIONS,
@@ -193,8 +205,31 @@ class MiWifiSelect(MiWifiEntity, SelectEntity):
             self._wifi_data = updater.data.get(DATA_MAP[description.key], {})
 
         self._attr_available: bool = (
-            updater.data.get(ATTR_STATE, False) and len(self._attr_options) > 0
+            updater.data.get(ATTR_STATE, False)
+            and len(self._attr_options) > 0
+            and not self._merged_by_band_steering()
         )
+
+    def _merged_by_band_steering(self) -> bool:
+        """Is this a control for a band the router no longer keeps separate?
+
+        Band steering (the router's "Smart connect") presents 2.4 and 5 GHz as
+        one network. switch.py already takes the 5 GHz switches out of service
+        for it; the channel and signal controls for the same band were left
+        behind, so a node could offer a channel to set on a band whose on/off
+        it declared unavailable - and on the firmwares that report no channel
+        at all, offer it reading `unknown`.
+
+        Availability only. Registration must not depend on this: the value
+        changes, a registry default does not.
+
+        :return bool: the band is merged and this control belongs to it
+        """
+
+        if self.entity_description.key not in BAND_STEERING_MERGED:
+            return False
+
+        return bool(self._updater.data.get(ATTR_BINARY_SENSOR_DUAL_BAND, False))
 
     @property
     def icon(self) -> str | None:
@@ -214,6 +249,7 @@ class MiWifiSelect(MiWifiEntity, SelectEntity):
             self._updater.data.get(ATTR_STATE, False)
             and len(self._attr_options) > 0
             and len(wifi_data) > 0
+            and not self._merged_by_band_steering()
         )
 
         data_changed: list = [
