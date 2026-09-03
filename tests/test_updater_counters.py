@@ -42,6 +42,7 @@ def _updater(mode: Mode = Mode.ACCESS_POINT, is_force_load: bool = False) -> Luc
     updater._is_first_update = True
     updater._moved_devices = []
     updater._counters_reset_this_cycle = False
+    updater._parent_push_pending = False
     updater._signals = {}
     updater._store = None
     updater._build_device = lambda device, integrations=None: dict(device)
@@ -153,3 +154,27 @@ async def test_devices_owned_by_the_parent_are_not_persisted() -> None:
     await updater._async_save_devices()
 
     updater._store.async_save.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_counting_a_client_for_ourselves_drops_the_parents_claim() -> None:
+    """A first-hand count is not the number the main handed over."""
+
+    updater = _updater()
+    updater._parent_push_pending = True
+
+    await updater.add_device(_client("AA:BB:CC:DD:EE:01"))
+
+    assert updater._parent_push_pending is False
+
+
+@pytest.mark.asyncio
+async def test_a_client_the_main_hands_over_leaves_the_claim_standing() -> None:
+    """It is the push itself: spending it here would defeat the floor."""
+
+    updater = _updater()
+    updater._parent_push_pending = True
+
+    await updater.add_device(_client("AA:BB:CC:DD:EE:01"), is_from_parent=True)
+
+    assert updater._parent_push_pending is True

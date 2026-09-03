@@ -9,6 +9,13 @@ A count the main pushes in is a weaker claim than one the node made for
 itself: the main can only name the clients its own device list carries,
 which on a mesh bridged onto the ISP's LAN is a fraction of what the node
 serves. It is a floor, and the graph outranks it while it knows about more.
+
+That claim reaches the leaf through `_parent_push_pending`, which the main
+sets from *its* cycle. It therefore has to outlive ours: while it was cleared
+at the top of `update()`, the two nodes polled as separate tasks and the flag
+was gone before the floor was ever consulted - seven straight cycles of a live
+mesh took the other branch. It is spent where it is read, or as soon as the
+node counts a client for itself.
 """
 
 # pylint: disable=no-member,protected-access
@@ -38,7 +45,7 @@ def _updater(ip: str = LEAF_IP, mode: Mode = Mode.MESH_NODE) -> LuciUpdater:
     updater.is_force_load = False
     updater.data = {ATTR_SENSOR_MODE: mode}
     updater._counters_reset_this_cycle = False
-    updater._counters_pushed_this_cycle = False
+    updater._parent_push_pending = False
 
     hass = MagicMock()
 
@@ -120,7 +127,7 @@ async def test_a_count_the_main_pushed_in_is_only_a_floor() -> None:
     leaf = _updater()
     leaf.data[ATTR_SENSOR_DEVICES] = 1
     leaf._counters_reset_this_cycle = True
-    leaf._counters_pushed_this_cycle = True
+    leaf._parent_push_pending = True
 
     with _patch_integrations(leaf, _main(onlines=7)):
         await leaf._async_apply_leaf_client_count()
@@ -135,7 +142,7 @@ async def test_a_pushed_count_the_graph_cannot_beat_stands() -> None:
     leaf = _updater()
     leaf.data[ATTR_SENSOR_DEVICES] = 9
     leaf._counters_reset_this_cycle = True
-    leaf._counters_pushed_this_cycle = True
+    leaf._parent_push_pending = True
 
     with _patch_integrations(leaf, _main(onlines=7)):
         await leaf._async_apply_leaf_client_count()
@@ -150,7 +157,7 @@ async def test_the_two_agreeing_is_not_a_change() -> None:
     leaf = _updater()
     leaf.data[ATTR_SENSOR_DEVICES] = 7
     leaf._counters_reset_this_cycle = True
-    leaf._counters_pushed_this_cycle = True
+    leaf._parent_push_pending = True
 
     with _patch_integrations(leaf, _main(onlines=7)):
         await leaf._async_apply_leaf_client_count()
@@ -165,7 +172,7 @@ async def test_a_pushed_count_says_who_handed_it_over(caplog) -> None:
     leaf = _updater()
     leaf.data[ATTR_SENSOR_DEVICES] = 1
     leaf._counters_reset_this_cycle = True
-    leaf._counters_pushed_this_cycle = True
+    leaf._parent_push_pending = True
 
     with caplog.at_level(logging.DEBUG):
         with _patch_integrations(leaf, _main(onlines=7)):
@@ -252,3 +259,57 @@ async def test_an_unlisted_leaf_changes_nothing() -> None:
         await leaf._async_apply_leaf_client_count()
 
     assert leaf.data[ATTR_SENSOR_DEVICES] == 5
+
+
+@pytest.mark.asyncio
+async def test_our_own_cycle_does_not_spend_the_parents_claim() -> None:
+    """The bug: the leaf's cycle cleared a flag only the main ever sets."""
+
+    leaf = _updater()
+    leaf._counters_reset_this_cycle = True
+    leaf._parent_push_pending = True
+
+    leaf._begin_cycle()
+
+    assert leaf._counters_reset_this_cycle is False
+    assert leaf._parent_push_pending is True
+
+
+@pytest.mark.asyncio
+async def test_reading_the_claim_spends_it() -> None:
+    """One push is one floor. The next cycle holds a stale value, not a claim."""
+
+    leaf = _updater()
+    leaf.data[ATTR_SENSOR_DEVICES] = 9
+    leaf._counters_reset_this_cycle = True
+    leaf._parent_push_pending = True
+
+    with _patch_integrations(leaf, _main(onlines=7)):
+        await leaf._async_apply_leaf_client_count()
+
+    assert leaf.data[ATTR_SENSOR_DEVICES] == 9
+    assert leaf._parent_push_pending is False
+
+    # Same numbers, no fresh push: the graph is now the better answer.
+    leaf._counters_reset_this_cycle = False
+
+    with _patch_integrations(leaf, _main(onlines=7)):
+        await leaf._async_apply_leaf_client_count()
+
+    assert leaf.data[ATTR_SENSOR_DEVICES] == 7
+
+
+@pytest.mark.asyncio
+async def test_a_claim_that_arrives_before_our_graph_step_still_lands(caplog) -> None:
+    """The live case: the main pushes, then the leaf polls and reads the graph."""
+
+    leaf = _updater()
+    leaf.data[ATTR_SENSOR_DEVICES] = 2
+    leaf._parent_push_pending = True
+
+    with caplog.at_level(logging.DEBUG):
+        with _patch_integrations(leaf, _main(onlines=16)):
+            await leaf._async_apply_leaf_client_count()
+
+    assert leaf.data[ATTR_SENSOR_DEVICES] == 16
+    assert "was handed 2 client(s) by the main" in caplog.text

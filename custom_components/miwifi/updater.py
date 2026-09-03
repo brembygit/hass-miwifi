@@ -378,9 +378,11 @@ class LuciUpdater(DataUpdateCoordinator):
         # Set once per cycle by reset_counter(); see _counters_pushed_by_parent.
         self._counters_reset_this_cycle: bool = False
 
-        # ...and set when that reset came from the main handing us its clients,
-        # which is a weaker claim than having counted them ourselves.
-        self._counters_pushed_this_cycle: bool = False
+        # Set when the main hands us its clients, which is a weaker claim than
+        # having counted them ourselves. The main sets it from *its* cycle, so
+        # it deliberately outlives ours: it is cleared where it is read, or as
+        # soon as we count a client for ourselves - not at the top of update().
+        self._parent_push_pending: bool = False
 
         # Last (mapped, skipped) wifi adapter names reported at debug.
         self._wifi_adapters_logged: tuple | None = None
@@ -453,6 +455,18 @@ class LuciUpdater(DataUpdateCoordinator):
 
         return timedelta(seconds=self._scan_interval)
 
+    def _begin_cycle(self) -> None:
+        """Clear the state that is scoped to one poll of this node.
+
+        `_parent_push_pending` is deliberately **not** cleared here. The main
+        sets it from its own cycle, into this updater, and the two poll as
+        separate tasks: clearing it at the top of ours is what left the floor in
+        `_async_apply_leaf_client_count` unapplied on every ordinary cycle. It
+        is spent where it is read, or when we count a client for ourselves.
+        """
+
+        self._counters_reset_this_cycle = False
+
     async def update(self, retry: int = 1) -> dict:
         """Update miwifi information.
 
@@ -461,8 +475,7 @@ class LuciUpdater(DataUpdateCoordinator):
         """
 
         self.code = codes.OK
-        self._counters_reset_this_cycle = False
-        self._counters_pushed_this_cycle = False
+        self._begin_cycle()
 
         _is_before_reauthorization: bool = self._is_reauthorization
         _err: LuciError | None = None
@@ -2032,7 +2045,7 @@ class LuciUpdater(DataUpdateCoordinator):
                 continue
 
             # ✅ Reset counters ONCE per parent refresh before recounting
-            updater._counters_pushed_this_cycle = True
+            updater._parent_push_pending = True
             updater.reset_counter(is_force=True)
 
             leaf_entry_id = getattr(updater, "_entry_id", None) or self._entry_id
@@ -2206,6 +2219,12 @@ class LuciUpdater(DataUpdateCoordinator):
         if self.is_repeater and self.is_force_load:
             if not (is_from_parent and self._has_dedicated_iot_wifi()):
                 return
+
+        # Counting a client for ourselves changes what the value *is*: it stops
+        # being the number the main handed over, so the floor that protects a
+        # handed-over number stops applying to it.
+        if not is_from_parent:
+            self._parent_push_pending = False
 
         # A node whose counters are pushed by the parent skips the reset at the
         # top of the cycle - but it still enumerates its own clients through
@@ -2553,14 +2572,20 @@ class LuciUpdater(DataUpdateCoordinator):
         exactly when this node reset in order to recount, so it is the test for
         "we produced real numbers this cycle".
 
-        A count the main pushed in is not that. The main can only hand over the
-        clients its own misystem/devicelist names, and on a mesh bridged onto
-        somebody else's LAN - where the DHCP server is the ISP gateway, not the
-        router - that list holds a fraction of what a node really serves: one
-        client of seven, on the mesh this was traced on. A pushed count is
-        therefore a floor, not a census, and the graph still wins while it knows
-        about more clients than were handed over. It never replaces a larger
-        first-hand count with a smaller relayed one.
+        A count the main pushed in is not that. It arrives through
+        `_parent_push_pending`, which the main sets from its own cycle and this
+        method spends: the two nodes poll as separate tasks, so a flag scoped to
+        our cycle was cleared before we ever looked at it, and the floor below
+        was decorative.
+
+        The main can only hand over the clients its own misystem/devicelist
+        names, and on a mesh bridged onto somebody else's LAN - where the DHCP
+        server is the ISP gateway, not the router - that list holds a fraction
+        of what a node really serves: one client of seven, on the mesh this was
+        traced on. A pushed count is therefore a floor, not a census, and the
+        graph still wins while it knows about more clients than were handed
+        over. It never replaces a larger first-hand count with a smaller
+        relayed one.
 
         Zero is a real answer: a leaf that no client is steered to reports 0
         cleanly rather than going unknown.
@@ -2569,7 +2594,15 @@ class LuciUpdater(DataUpdateCoordinator):
         if not self.is_access_point:
             return
 
-        if self._counters_reset_this_cycle and not self._counters_pushed_this_cycle:
+        # Consume the latch here, not at the top of update(). The main sets it
+        # from its own cycle, into this updater; the two run as separate tasks
+        # on separate schedules, so a latch cleared by our own cycle was almost
+        # never still standing by the time we reached this line, and the floor
+        # below went unapplied. Reading it is what spends it.
+        handed_by_parent: bool = self._parent_push_pending
+        self._parent_push_pending = False
+
+        if self._counters_reset_this_cycle and not handed_by_parent:
             return
 
         leaf: dict | None = self._leaf_entry_from_other_nodes()
@@ -2587,11 +2620,11 @@ class LuciUpdater(DataUpdateCoordinator):
         counted = self.data.get(ATTR_SENSOR_DEVICES)
 
         # Two different things reach this point, and the log has to tell them
-        # apart: a count somebody handed us this cycle, or the value the sensor
-        # happened to be holding from an earlier one. Reporting both as
+        # apart: a count the main handed over and nobody has spent yet, or the
+        # value the sensor happened to be holding. Reporting both as
         # "counted" made the second read as a first-hand census being overruled,
         # which is exactly the wrong thing to tell somebody reading the log.
-        if self._counters_pushed_this_cycle:
+        if handed_by_parent:
             if not isinstance(counted, int) or onlines <= counted:
                 return
 
