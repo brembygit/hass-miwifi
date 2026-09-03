@@ -25,6 +25,7 @@ def _updater(is_ap_mode: bool) -> LuciUpdater:
 
     updater = LuciUpdater.__new__(LuciUpdater)
     updater.is_ap_mode = is_ap_mode
+    updater._role_skips_logged = set()
     updater.ip = "192.168.31.104"
     updater.data = {}
     updater._is_cb0401v2 = False

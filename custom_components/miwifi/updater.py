@@ -385,6 +385,9 @@ class LuciUpdater(DataUpdateCoordinator):
         # Last (mapped, skipped) wifi adapter names reported at debug.
         self._wifi_adapters_logged: tuple | None = None
 
+        # Steps skipped because of this node's role, already reported.
+        self._role_skips_logged: set[str] = set()
+
         # The topology-derived role is reported once, not once per cycle.
         self._topology_role_logged: bool = False
 
@@ -650,6 +653,31 @@ class LuciUpdater(DataUpdateCoordinator):
             return True
 
         return self.data.get(ATTR_SENSOR_MODE, Mode.DEFAULT) in MESH_ROLE_MODES
+
+    async def _log_role_skip(self, step: str) -> None:
+        """Say once that a step does not apply to a node in somebody else's network.
+
+        Three steps are skipped for a node in an access point or mesh role, and
+        each said so on every poll cycle. That is a steady state, not an event:
+        on a four node mesh at thirty seconds a cycle the three of them were
+        about a fifth of the debug log, which is a fifth of the room left for
+        the lines that carry news.
+
+        Said once per step for the life of the updater. A role that actually
+        changes is already reported by _async_prepare_mode, and a reload starts
+        the count over.
+
+        :param step: str: the step not being run
+        """
+
+        if step in self._role_skips_logged:
+            return
+
+        self._role_skips_logged.add(step)
+
+        await self.hass.async_add_executor_job(
+            _LOGGER.debug, "[MiWiFi] AP mode: skipping %s for %s", step, self.ip
+        )
 
     @property
     def _counters_pushed_by_parent(self) -> bool:
@@ -1105,9 +1133,7 @@ class LuciUpdater(DataUpdateCoordinator):
         # its own device list and resetting the client counters.
         if self.is_ap_mode:
             data[ATTR_SENSOR_MODE] = Mode.ACCESS_POINT
-            await self.hass.async_add_executor_job(
-                _LOGGER.debug, "[MiWiFi] AP mode: skipping 'mode' for %s", self.ip
-            )
+            await self._log_role_skip("'mode'")
             return
 
         # ✅ CB0401V2: skip mode endpoint (often dead/404 on provider firmware)
@@ -1334,9 +1360,7 @@ class LuciUpdater(DataUpdateCoordinator):
             return None
 
         if self.is_access_point:
-            await self.hass.async_add_executor_job(
-                _LOGGER.debug, "[MiWiFi] AP mode: skipping 'wan' for %s", self.ip
-            )
+            await self._log_role_skip("'wan'")
             return
 
         try:
@@ -1759,9 +1783,7 @@ class LuciUpdater(DataUpdateCoordinator):
         next_try = getattr(self, "_macfilter_next_try", now)
         # MAC filtering lives on the gateway, never on an access point node.
         if self.is_access_point:
-            await self.hass.async_add_executor_job(
-                _LOGGER.debug, "[MiWiFi] AP mode: skipping macfilter_info for %s", self.ip
-            )
+            await self._log_role_skip("macfilter_info")
         elif now >= next_try:
             call_timeout = self._macfilter_call_timeout()
             try:

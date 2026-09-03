@@ -34,6 +34,7 @@ def _updater(ip: str = LEAF_IP, is_ap_mode: bool = False) -> LuciUpdater:
     updater.luci = MagicMock()
     updater._is_cb0401v2 = False
     updater._topology_role_logged = False
+    updater._role_skips_logged = set()
 
     hass = MagicMock()
 
