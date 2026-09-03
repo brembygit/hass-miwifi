@@ -15,6 +15,8 @@ serves. It is a floor, and the graph outranks it while it knows about more.
 
 from __future__ import annotations
 
+import logging
+
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -154,6 +156,60 @@ async def test_the_two_agreeing_is_not_a_change() -> None:
         await leaf._async_apply_leaf_client_count()
 
     assert leaf.data[ATTR_SENSOR_DEVICES] == 7
+
+
+@pytest.mark.asyncio
+async def test_a_pushed_count_says_who_handed_it_over(caplog) -> None:
+    """The log has to name the mechanism, not imply we counted for ourselves."""
+
+    leaf = _updater()
+    leaf.data[ATTR_SENSOR_DEVICES] = 1
+    leaf._counters_reset_this_cycle = True
+    leaf._counters_pushed_this_cycle = True
+
+    with caplog.at_level(logging.DEBUG):
+        with _patch_integrations(leaf, _main(onlines=7)):
+            await leaf._async_apply_leaf_client_count()
+
+    assert "was handed 1 client(s) by the main" in caplog.text
+    assert "the graph knows about 7" in caplog.text
+    assert "counted" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_a_value_nobody_produced_is_not_reported_as_counted(caplog) -> None:
+    """It is the number the sensor was holding, not a census being overruled.
+
+    Read from a live log: `192.168.1.104 counted 3 client(s) of its own: taking
+    2`, on a cycle where that node counted nothing at all. The 3 was the graph's
+    own answer from a cycle before.
+    """
+
+    leaf = _updater()
+    leaf.data[ATTR_SENSOR_DEVICES] = 3
+
+    with caplog.at_level(logging.DEBUG):
+        with _patch_integrations(leaf, _main(onlines=2)):
+            await leaf._async_apply_leaf_client_count()
+
+    assert leaf.data[ATTR_SENSOR_DEVICES] == 2
+    assert "serves no client list of its own: taking 2" in caplog.text
+    assert "replacing 3" in caplog.text
+    assert "counted" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_nothing_is_said_when_nothing_changes(caplog) -> None:
+    """The steady state is silence, which is what makes the other lines news."""
+
+    leaf = _updater()
+    leaf.data[ATTR_SENSOR_DEVICES] = 2
+
+    with caplog.at_level(logging.DEBUG):
+        with _patch_integrations(leaf, _main(onlines=2)):
+            await leaf._async_apply_leaf_client_count()
+
+    assert "[MiWiFi]" not in caplog.text
 
 
 @pytest.mark.asyncio

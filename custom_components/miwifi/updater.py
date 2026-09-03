@@ -2586,19 +2586,36 @@ class LuciUpdater(DataUpdateCoordinator):
 
         counted = self.data.get(ATTR_SENSOR_DEVICES)
 
+        # Two different things reach this point, and the log has to tell them
+        # apart: a count somebody handed us this cycle, or the value the sensor
+        # happened to be holding from an earlier one. Reporting both as
+        # "counted" made the second read as a first-hand census being overruled,
+        # which is exactly the wrong thing to tell somebody reading the log.
         if self._counters_pushed_this_cycle:
             if not isinstance(counted, int) or onlines <= counted:
                 return
-        elif counted == onlines:
-            return
 
-        await self.hass.async_add_executor_job(
-            _LOGGER.debug,
-            "[MiWiFi] %s counted %s client(s) of its own: taking %s from the main's topology graph",
-            self.ip,
-            counted,
-            onlines,
-        )
+            await self.hass.async_add_executor_job(
+                _LOGGER.debug,
+                "[MiWiFi] %s was handed %s client(s) by the main, which can only"
+                " name the ones its own device list carries; the graph knows"
+                " about %s, so taking that",
+                self.ip,
+                counted,
+                onlines,
+            )
+        else:
+            if counted == onlines:
+                return
+
+            await self.hass.async_add_executor_job(
+                _LOGGER.debug,
+                "[MiWiFi] %s serves no client list of its own: taking %s from"
+                " the main's topology graph, replacing %s",
+                self.ip,
+                onlines,
+                counted,
+            )
 
         # Only the total. The graph does not split clients per band, and writing
         # a guess into the per-band counters would be worse than leaving them at
