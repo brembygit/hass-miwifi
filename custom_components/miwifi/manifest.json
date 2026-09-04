@@ -43,5 +43,5 @@
       "manufacturer": "Xiaomi",
       "deviceType": "urn:schemas-upnp-org:device:InternetGatewayDevice:1" }
   ],
-  "version": "3.6.18"
+  "version": "3.6.19"
 }
